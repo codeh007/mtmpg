@@ -9,7 +9,7 @@
 
 - [x] 2.1 增加README、MIT LICENSE、SECURITY、CONTRIBUTING/维护说明和仓库级AGENTS规则，准确说明非`CREATE EXTENSION`边界、支持矩阵、构建、测试、安装、升级与安全报告方式
 - [x] 2.2 增加发布与兼容文档，定义SemVer、PG/runtime变体、database-token/authn-id contract版本、prerelease/stable门禁、digest消费和rollback语义
-- [ ] 2.3 配置Dependabot只创建Cargo与GitHub Actions更新PR，禁止native认证依赖、Rust patch或PostgreSQL minor自动合并
+- [x] 2.3 配置Dependabot只创建Cargo与GitHub Actions更新PR，禁止native认证依赖、Rust patch或PostgreSQL minor自动合并
 - [ ] 2.4 收紧GitHub Actions为批准来源和full-SHA pin，保持默认workflow token只读，设置合并后删分支与批准的merge策略，并记录private套餐无法启用branch protection/rulesets的真实限制
 - [ ] 2.5 检查仓库描述、topics、issue/security/release设置与私有可见性，保持private默认且不擅自升级套餐或公开package
 
