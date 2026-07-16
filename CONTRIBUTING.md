@@ -4,15 +4,15 @@
 
 ## 从 Issue 建立变更范围
 
-每项工作应先关联一个 GitHub Issue，并把预期行为、非目标和验证证据写清楚。先运行以下命令；`issue_number=116` 是当前 Issue 的可执行示例，其他工作使用对应编号：
+每项工作应先关联一个 GitHub Issue，并把预期行为、非目标和验证证据写清楚。第一条命令列出 mtmpg 自有 Issue；第二条命令读取当前跨仓库任务的真实 Issue：
 
 ```bash
 gh issue list --repo codeh007/mtmpg --state open
-issue_number=116
-gh issue view "$issue_number" --repo codeh007/mtmpg
+gh issue view https://github.com/codeh007/gomtmui/issues/116 \
+  --json number,title,body,url,comments
 ```
 
-命令返回目标 Issue 后，按以下顺序限定变更：
+选择并读取目标 Issue 后，按以下顺序限定变更：
 
 1. 阅读 Issue 正文与已有讨论。
 2. 阅读相关 OpenSpec proposal、design、spec 和 tasks。
