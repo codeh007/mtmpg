@@ -31,9 +31,14 @@ id_ed25519
 .git-credentials
 .secret
 .secret.*
+.secret/
 .secrets/
+secret/
 secrets/
-/.credentials/
+.credential/
+.credentials/
+credential/
+credentials/
 **/.docker/config.json
 
 # PostgreSQL、数据库与 session 运行数据
