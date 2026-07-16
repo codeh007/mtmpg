@@ -1,6 +1,6 @@
 # pggomtm 维护规则
 
-本页定义当前源码与构建权威、维护者职责、人工审查门禁和候选发布前证据。它不建立尚未实现的 stable release；未来版本与发布门禁以[发布与兼容契约](docs/release-and-compatibility.md)为准。
+本页定义当前源码与构建权威、维护者职责、人工审查门禁和候选发布前证据。它不建立尚未实现的 stable release；未来版本与发布门禁以[发布与兼容契约](docs/release-and-compatibility.md)为准。Actions 来源、默认 token 权限、合并策略与套餐限制见[GitHub Actions 与合并治理](docs/github-governance.md)。
 
 ## 唯一源码与构建权威
 
