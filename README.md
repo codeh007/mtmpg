@@ -123,5 +123,6 @@ oauth_validator_libraries = 'pggomtm'
 
 - 阅读[贡献指南](CONTRIBUTING.md)后再提交代码或文档变更。
 - 阅读[维护规则](MAINTAINERS.md)了解源码权威与人工审查门禁。
+- 阅读[发布与兼容契约](docs/release-and-compatibility.md)了解未来 SemVer、manifest、stable 门禁和 digest 回退规则。
 - 按[安全政策](SECURITY.md)私密报告可能泄露 secret 或影响认证边界的问题。
 - 自动化开发代理必须遵守[仓库级 AGENTS 规则](AGENTS.md)。
