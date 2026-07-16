@@ -12,7 +12,17 @@
 | 当前分支与本地候选镜像 | 仅供开发、测试和安全评审，不是生产发布物 |
 | `abi-gate`、`abi-runtime-gate`、`pgx-oauth-gate` | 仅供测试，不属于受支持的生产能力 |
 
-安全报告可以覆盖认证绕过、原生应用程序二进制接口（ABI）或内存安全、panic 边界、JSON Web Token（JWT）与 JSON Web Key Set（JWKS）验证、secret 泄露、构建链污染和测试 gate 进入无 gate 制品等问题。请同时说明问题是否只影响测试 feature。
+安全报告可以覆盖以下问题：
+
+- 认证绕过
+- 原生应用程序二进制接口（ABI）或内存安全
+- panic 边界
+- JSON Web Token（JWT）与 JSON Web Key Set（JWKS）验证
+- secret 泄露
+- 构建链污染
+- 测试 gate 进入无 gate 制品
+
+请同时说明问题是否只影响测试 feature。
 
 ## 私密报告安全问题
 

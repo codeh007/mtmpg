@@ -32,7 +32,7 @@ Agent 必须按当前任务范围核对现有契约：
 
 完整 `pgrx` 是 PostgreSQL 集成边界。Agent 必须保留 `pgrx` 提供的 module magic、guard、PostgreSQL error 与 allocator 语义，不能用自行实现的替代层绕开这些边界。
 
-PostgreSQL OAuth ABI 的目标权威是目标 `pg_config --includedir-server` 下的 `libpq/oauth.h`。当前 pgrx 0.19.1 的 PG18 bindgen 输入没有完整覆盖该 header，因此不得把缺失的 pgrx 生成类型误当成 OAuth ABI 权威。
+PostgreSQL OAuth ABI 的目标权威是目标 `pg_config --includedir-server` 下的 `libpq/oauth.h`。当前 pgrx 0.19.1 的 PostgreSQL 18 bindgen 输入没有完整覆盖该 header，因此不得把缺失的 pgrx 生成类型误当成 OAuth ABI 权威。
 
 涉及 OAuth struct、magic、callback 或 layout 时，Agent 必须以精确官方 header、C probe 和受控生成结果交叉验证。不要新增第二套手写声明；生成文件只能通过仓库提供的生成命令更新，不得手写。
 

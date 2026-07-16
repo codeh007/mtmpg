@@ -4,9 +4,17 @@
 
 ## 从 Issue 建立变更范围
 
-每项工作应先关联一个 GitHub Issue，并把预期行为、非目标和验证证据写清楚：
+每项工作应先关联一个 GitHub Issue，并把预期行为、非目标和验证证据写清楚。先运行以下命令；`issue_number=116` 是当前 Issue 的可执行示例，其他工作使用对应编号：
 
-1. 使用 `gh issue view` 阅读 Issue 正文与已有讨论。
+```bash
+gh issue list --repo codeh007/mtmpg --state open
+issue_number=116
+gh issue view "$issue_number" --repo codeh007/mtmpg
+```
+
+命令返回目标 Issue 后，按以下顺序限定变更：
+
+1. 阅读 Issue 正文与已有讨论。
 2. 阅读相关 OpenSpec proposal、design、spec 和 tasks。
 3. 从当前目标分支创建名称包含 Issue 编号的短期分支。
 4. 只提交该 Issue 与当前 OpenSpec task 所需的文件。
@@ -18,7 +26,7 @@
 PR 应让维护者能够从 clean checkout 复现结论：
 
 - 关联 Issue 与对应 OpenSpec change，并说明本次完成的 task 范围。
-- 说明行为变化、原生 ABI 影响、安全边界和回退方式。
+- 说明行为变化、原生应用程序二进制接口（ABI）影响、安全边界和回退方式。
 - 列出执行过的命令、exit code、通过数量和未运行项目。
 - 附上不含 secret 的证据路径，不粘贴环境变量或完整构建凭据。
 - 如果使用人工智能（AI）辅助，说明使用范围与人工核对内容。
@@ -50,7 +58,7 @@ cargo test --locked --no-default-features \
   --test pgx_oauth_gate
 ```
 
-随后运行与 Dockerfile 相同的两组全 target Clippy 检查：
+随后运行与 `Dockerfile` 相同的两组全 target Clippy 检查：
 
 ```bash
 for feature_set in \
@@ -62,7 +70,7 @@ do
 done
 ```
 
-最后运行与 Dockerfile 相同的两组 library Clippy 检查：
+最后运行与 `Dockerfile` 相同的两组 library Clippy 检查：
 
 ```bash
 for feature_set in "pg18,abi-runtime-gate" "pg18"
@@ -88,7 +96,7 @@ DOCKER_BUILDKIT=1 docker build \
   .
 ```
 
-涉及 JWT、role、identity 或 OAuth callback 时，再构建测试专用 gate target：
+涉及 JSON Web Token（JWT）、role、identity 或 OAuth callback 时，再构建测试专用 gate target：
 
 ```bash
 DOCKER_BUILDKIT=1 docker build \
