@@ -1,1 +1,10 @@
-target
+# 默认拒绝整个工作树，只开放 Docker 构建所需的最小输入。
+**
+!Dockerfile
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!src/
+!src/**
+!tests/
+!tests/**
