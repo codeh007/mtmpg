@@ -18,7 +18,7 @@
 - `gomtmui/` 路径或 `native/pggomtm/` 嵌套源码副本。
 
 迁移提交的 13 个路径仅为 `.dockerignore`、Cargo manifest/lock、toolchain、
-Dockerfile、两个 `src/` 文件和七个 `tests/` 文件。它没有携带目录嵌套、
+Dockerfile、两个 `src/` 文件和六个 `tests/` 文件。它没有携带目录嵌套、
 缓存、运行数据或 image。当前 index 在加入本证据后共有 24 个 tracked 路径。
 
 ## Git 路径边界
@@ -36,10 +36,17 @@ scan_path_stream() {
   scope=$1
   found=0
   while IFS= read -r -d '' path; do
-    if [[ $path =~ $forbidden_path_pattern ]]; then
-      printf '%s: MATCH %q\n' "$scope" "$path" >&2
-      found=1
-    fi
+    set +e
+    [[ $path =~ $forbidden_path_pattern ]]
+    match_rc=$?
+    set -e
+    case "$match_rc" in
+      0) printf '%s: MATCH %q\n' "$scope" "$path" >&2; found=1 ;;
+      1) ;;
+      2) printf '%s: REGEX_ERROR (matcher exit 2)\n' "$scope" >&2; return 2 ;;
+      *) printf '%s: MATCHER_ERROR (exit %s)\n' \
+           "$scope" "$match_rc" >&2; return "$match_rc" ;;
+    esac
   done
   test "$found" -eq 0
 }
@@ -55,8 +62,12 @@ run_path_scan() {
     printf '%s: ENUMERATOR_ERROR (exit %s)\n' "$scope" "${status[0]}" >&2
     return "${status[0]}"
   }
-  test "${status[1]}" -eq 0 || return 1
-  printf '%s: PASS\n' "$scope"
+  case "${status[1]}" in
+    0) printf '%s: PASS\n' "$scope" ;;
+    1) return 1 ;;
+    *) printf '%s: MATCHER_ERROR (exit %s)\n' \
+         "$scope" "${status[1]}" >&2; return "${status[1]}" ;;
+  esac
 }
 
 run_path_scan head git ls-tree -rz --name-only HEAD
@@ -64,17 +75,84 @@ run_path_scan index git ls-files -z --cached
 run_path_scan migration git ls-tree -rz --name-only \
   d4231226be6dc59599bce331d487b9b20039dcb6
 
+migration_commit=d4231226be6dc59599bce331d487b9b20039dcb6
+expected_migration=$(printf '%s\n' \
+  '.dockerignore' \
+  'Cargo.lock' \
+  'Cargo.toml' \
+  'Dockerfile' \
+  'rust-toolchain.toml' \
+  'src/database_auth.rs' \
+  'src/lib.rs' \
+  'tests/abi_layout.rs' \
+  'tests/jwt_identity.rs' \
+  'tests/oauth_layout_probe.c' \
+  'tests/oauth_runtime_probe.c' \
+  'tests/oauth_runtime_probe.sql' \
+  'tests/pgx_oauth_gate.rs')
+
+set +e
+migration_output=$(git diff-tree --no-commit-id --name-only -r \
+  "$migration_commit" 2>&1)
+migration_rc=$?
+set -e
+test "$migration_rc" -eq 0 || {
+  printf 'migration diff-tree TOOL_ERROR (exit %s)\n%s\n' \
+    "$migration_rc" "$migration_output" >&2
+  exit "$migration_rc"
+}
+actual_migration=$(printf '%s\n' "$migration_output" | LC_ALL=C sort -u)
+
+manifest=docs/evidence/issue-116/pggomtm-source.sha256
+set +e
+manifest_output=$(sed -n -E \
+  's/^[0-9a-f]{64}  native\/pggomtm\/(.*)$/\1/p' "$manifest" 2>&1)
+manifest_rc=$?
+set -e
+test "$manifest_rc" -eq 0 || {
+  printf 'migration manifest TOOL_ERROR (exit %s)\n%s\n' \
+    "$manifest_rc" "$manifest_output" >&2
+  exit "$manifest_rc"
+}
+manifest_paths=$(printf '%s\n' "$manifest_output" | LC_ALL=C sort -u)
+
+migration_count=$(printf '%s\n' "$actual_migration" | wc -l)
+manifest_line_count=$(wc -l < "$manifest")
+manifest_path_count=$(printf '%s\n' "$manifest_paths" | wc -l)
+test "$migration_count" -eq 13
+test "$manifest_line_count" -eq 13
+test "$manifest_path_count" -eq 13
+test "$actual_migration" = "$expected_migration"
+test "$manifest_paths" = "$expected_migration"
+printf 'migration_allowset=PASS diff_count=%s manifest_count=%s\n' \
+  "$migration_count" "$manifest_path_count"
+
 commits_text=$(git rev-list --all)
 mapfile -t commits <<<"$commits_text"
 for commit in "${commits[@]}"; do
   run_path_scan "commit:$commit" git ls-tree -rz --name-only "$commit"
 done
 printf 'commit_count=%s\n' "${#commits[@]}"
+
+saved_path_pattern=$forbidden_path_pattern
+forbidden_path_pattern='['
+set +e
+printf 'safe-path\0' | scan_path_stream regex-negative
+negative_status=("${PIPESTATUS[@]}")
+set -e
+forbidden_path_pattern=$saved_path_pattern
+test "${negative_status[0]}" -eq 0
+test "${negative_status[1]}" -eq 2
+printf 'path_regex_error_negative=PASS matcher_exit=%s\n' \
+  "${negative_status[1]}"
 ```
 
 复验结果：HEAD、index、迁移提交及逐个可达 commit tree 全部 `PASS`。
 模式显式覆盖独立 `.gz`、`.zst` 以及 `.gitignore` 中的 image/archive 类别；
-没有使用 `git rev-list --objects --all` 的单一路径提示作为历史路径证明。
+迁移 diff、硬编码 13-file allowset 与受审查 checksum 清单去前缀后的 13 个
+路径完全相等。故意非法 regex 返回 matcher status 2 并被负向自测捕获，不能
+冒充“无匹配”。没有使用 `git rev-list --objects --all` 的单一路径提示作为
+历史路径证明。
 
 ## 敏感内容扫描
 
@@ -194,15 +272,26 @@ production 入口都会导致集合不等而失败。模式在文档源码中拆
 set -euo pipefail
 
 collect_fixture_lines() {
-  mode=$1 pattern=$2
-  set +e
-  if test "$mode" = fixed; then
-    output=$(git grep --cached -n -F -e "$pattern" -- 2>&1)
+  mode=$1 pattern=$2 tree=$3
+  cmd=(git grep)
+  test "$tree" = index && cmd+=(--cached)
+  cmd+=(-n)
+  case "$mode" in
+    fixed) cmd+=(-F) ;;
+    regex) cmd+=(-E) ;;
+    *) printf 'fixture search INVALID_MODE %q\n' "$mode" >&2; return 64 ;;
+  esac
+  cmd+=(-e "$pattern")
+  case "$tree" in
+    index) cmd+=(--) ;;
+    *) cmd+=("$tree" --) ;;
+  esac
+
+  if output=$("${cmd[@]}" 2>&1); then
+    rc=0
   else
-    output=$(git grep --cached -n -E -e "$pattern" -- 2>&1)
+    rc=$?
   fi
-  rc=$?
-  set -e
   case "$rc" in
     0) printf '%s\n' "$output" \
          | sed -E 's/^([^:]+:[0-9]+):.*$/\1/' \
@@ -211,6 +300,21 @@ collect_fixture_lines() {
     *) printf 'fixture search TOOL_ERROR (exit %s)\n%s\n' \
          "$rc" "$output" >&2; return "$rc" ;;
   esac
+}
+
+capture_fixture_lines() {
+  result_name=$1 mode=$2 pattern=$3 tree=$4
+  if captured=$(collect_fixture_lines "$mode" "$pattern" "$tree"); then
+    rc=0
+  else
+    rc=$?
+  fi
+  if test "$rc" -ne 0; then
+    printf '%s fixture capture failed (exit %s)\n' \
+      "$result_name" "$rc" >&2
+    return "$rc"
+  fi
+  printf -v "$result_name" '%s' "$captured"
 }
 
 compare_fixture_set() {
@@ -251,22 +355,42 @@ expected_gate=$(printf '%s\n' \
   'tests/pgx_oauth_gate.rs:66' \
   'tests/pgx_oauth_gate.rs:8')
 
-compare_fixture_set scalar \
-  "$(collect_fixture_lines fixed "$scalar_pattern")" "$expected_scalar"
-compare_fixture_set placeholder \
-  "$(collect_fixture_lines fixed "$placeholder_pattern")" "$expected_placeholder"
-compare_fixture_set gate \
-  "$(collect_fixture_lines regex "$gate_pattern")" "$expected_gate"
-compare_fixture_set pem "$(collect_fixture_lines regex "$pem_pattern")" ''
-compare_fixture_set compact-jwt "$(collect_fixture_lines regex "$jwt_pattern")" ''
+capture_fixture_lines actual_scalar fixed "$scalar_pattern" index
+compare_fixture_set scalar "$actual_scalar" "$expected_scalar"
+capture_fixture_lines actual_placeholder fixed "$placeholder_pattern" index
+compare_fixture_set placeholder "$actual_placeholder" "$expected_placeholder"
+capture_fixture_lines actual_gate regex "$gate_pattern" index
+compare_fixture_set gate "$actual_gate" "$expected_gate"
+capture_fixture_lines actual_pem regex "$pem_pattern" index
+compare_fixture_set pem "$actual_pem" ''
+capture_fixture_lines actual_jwt regex "$jwt_pattern" index
+compare_fixture_set compact-jwt "$actual_jwt" ''
+
+if capture_fixture_lines negative_revision regex "$pem_pattern" \
+  refs/heads/__task3_missing_revision__; then
+  negative_revision_rc=0
+else
+  negative_revision_rc=$?
+fi
+if capture_fixture_lines negative_mode invalid "$pem_pattern" index; then
+  negative_mode_rc=0
+else
+  negative_mode_rc=$?
+fi
+test "$negative_revision_rc" -gt 1
+test "$negative_mode_rc" -eq 64
+printf 'fixture_tool_error_negative=PASS revision_exit=%s mode_exit=%s\n' \
+  "$negative_revision_rc" "$negative_mode_rc"
 ```
 
 复验结果：五个集合全部 `PASS`。固定测试标量只在两个 integration test；三段
 占位值只在 Rust ABI test 和 C runtime probe；gate 标识只在 feature-gated
 源码/测试入口及 Dockerfile 的排除扫描。仓库没有 test PEM 或落盘 compact
 JWT。public verifying JWK 不是 secret；确定性标量不会授权任何真实 issuer、
-数据库或部署环境。Docker build context 携带 `tests/**` 只为执行现有门禁，
-最终 stage 不复制 tests。
+数据库或部署环境。每次搜索的 stdout 与 exit code 都先独立捕获，确认成功后
+才进入集合比较；不存在 revision 与非法 mode 的负向自测分别保持工具错误
+状态，空 PEM/JWT expected 不能吞掉失败。Docker build context 携带
+`tests/**` 只为执行现有门禁，最终 stage 不复制 tests。
 
 ## `.gitignore` 复验
 
