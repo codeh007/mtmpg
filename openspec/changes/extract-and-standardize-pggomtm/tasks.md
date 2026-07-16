@@ -3,7 +3,7 @@
 - [x] 1.1 记录`gomtmui/native/pggomtm`除`target/`外的完整文件清单、源码checksum、现有feature矩阵和本地image身份，并确认mtmpg工作树、remote与默认分支状态
 - [x] 1.2 把Cargo manifest/lock、toolchain、Dockerfile、Rust源码和测试迁入mtmpg仓库根目录，保持原型行为与测试向量不变且不引入workspace嵌套
 - [x] 1.3 完善`.gitignore`与`.dockerignore`，静态证明`target/`、本地image、secret、`.env`、data、session和gomtmui源码没有进入迁移内容或Git history
-- [ ] 1.4 在mtmpg clean checkout上重新运行现有ABI layout/runtime、JWT/JWKS、identity与pgx OAuth gate，比较迁移前后结果并保存不含secret的基线证据
+- [x] 1.4 在mtmpg clean checkout上重新运行现有ABI layout/runtime、JWT/JWKS、identity与pgx OAuth gate，比较迁移前后结果并保存不含secret的基线证据
 
 ## 2. 独立仓库规范与GitHub治理
 
