@@ -25,7 +25,7 @@
 ## 4. PG18 stable-line兼容与artifact身份
 
 - [x] 4.1 先修改版本门禁测试，要求`180003`、`180004`和未来PG18 numeric minor通过major检查，PG17/PG19拒绝，并删除精确`sversion == 180004`成功条件
-- [ ] 4.2 实现runtime PG18 major检查并继续依赖`PG_MODULE_MAGIC`与OAuth validator magic，确保不同major和ABI变化在加载/启动前失败
+- [x] 4.2 实现runtime PG18 major检查并继续依赖`PG_MODULE_MAGIC`与OAuth validator magic，确保不同major和ABI变化在加载/启动前失败
 - [ ] 4.3 固定每个build变体的Rust、pgrx、JOSE、PostgreSQL source/header、runtime base digest、target、arch与libc，并生成可比较artifact identity
 - [ ] 4.4 在精确PG18.4 runtime完成loader、allocator、callback和OAuth smoke，记录“已验证minor”而不宣称未运行minor已获准部署
 

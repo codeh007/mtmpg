@@ -116,11 +116,11 @@ pggomtm_abi_runtime_probe(PG_FUNCTION_ARGS)
 		.private_data = NULL,
 	};
 	ValidatorModuleResult result = {0};
-	ValidatorModuleState wrong_minor_state = {
-		.sversion = PG_VERSION_NUM - 1,
+	ValidatorModuleState wrong_major_state = {
+		.sversion = PG_VERSION_NUM - 10000,
 		.private_data = NULL,
 	};
-	volatile bool wrong_minor_rejected = false;
+	volatile bool wrong_major_rejected = false;
 	volatile bool null_startup_rejected = false;
 	OAuthValidatorCallbacks invalid_callbacks;
 
@@ -248,18 +248,18 @@ pggomtm_abi_runtime_probe(PG_FUNCTION_ARGS)
 
 	PG_TRY();
 	{
-		callbacks->startup_cb(&wrong_minor_state);
+		callbacks->startup_cb(&wrong_major_state);
 	}
 	PG_CATCH();
 	{
 		FlushErrorState();
-		wrong_minor_rejected = true;
+		wrong_major_rejected = true;
 	}
 	PG_END_TRY();
 
-	if (!wrong_minor_rejected || wrong_minor_state.private_data != NULL)
+	if (!wrong_major_rejected || wrong_major_state.private_data != NULL)
 		ereport(ERROR,
-				(errmsg("pggomtm ABI gate accepted an unsupported PostgreSQL minor")));
+				(errmsg("pggomtm ABI gate accepted an unsupported PostgreSQL major")));
 
 	callbacks->shutdown_cb(&state);
 	if (state.private_data != NULL)

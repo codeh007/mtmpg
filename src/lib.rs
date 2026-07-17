@@ -50,7 +50,7 @@ static OAUTH_CALLBACKS: OAuthValidatorCallbacks = OAuthValidatorCallbacks {
 
 #[must_use]
 pub const fn server_version_is_supported(server_version: i32) -> bool {
-    server_version == PG18_VERSION_NUM
+    server_version / 10_000 == 18
 }
 
 #[must_use]
@@ -82,10 +82,10 @@ unsafe extern "C-unwind" fn validator_startup(state: *mut ValidatorModuleState) 
 
     if !server_version_is_supported(state.sversion) {
         #[cfg(feature = "abi-gate")]
-        panic!("pggomtm requires PostgreSQL 18.4");
+        panic!("pggomtm requires PostgreSQL 18");
 
         #[cfg(not(feature = "abi-gate"))]
-        pgrx::error!("pggomtm requires PostgreSQL 18.4");
+        pgrx::error!("pggomtm requires PostgreSQL 18");
     }
 
     state.private_data = state as *mut ValidatorModuleState as *mut c_void;
