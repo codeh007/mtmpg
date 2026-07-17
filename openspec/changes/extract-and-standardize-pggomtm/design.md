@@ -1,14 +1,14 @@
 ## Context
 
-截至2026-07-17，`pggomtm` 已从 `/workspace/gomtmui/native/pggomtm/` 迁入mtmpg根目录并通过迁移基线，gomtmui中的本地副本和gate已经删除。远端`issue-116-extract-pggomtm`功能ref已经建立并指向`2b77107`，`origin/main`仍为初始commit；当前本地功能分支HEAD为`da45f7d`、领先远端功能ref 17个commit，并保留任务6.3的未提交测试与文档改动。仓库尚无workflow、Actions run、artifact、Release或`mtmpg-postgres` package，因此这些本地提交和image仍不是可审计的远端验收证据。
+截至2026-07-17，`pggomtm` 已从 `/workspace/gomtmui/native/pggomtm/` 迁入mtmpg根目录并通过迁移基线，gomtmui中的本地副本和gate已经删除。远端`issue-116-extract-pggomtm`功能ref已经包含并验证Native CI bootstrap实现点`55d1cec`，`origin/main`仍为初始commit `453b2a7`。首轮完整远端run与最终缓存/日志最小化run均成功，Actions artifact为0。仓库仍没有Release或`mtmpg-postgres` package。
 
-独立审查曾证明binding生成存在critical provenance缺口：`bindings.to_string()`被校验后，`write_to_file()`可再次通过bindgen默认formatter读取`RUSTFMT`或`PATH/rustfmt`并改写最终文件。当前本地实现已经禁用外部formatter、单次materialize并直接写入被校验的相同字节，任务3.x的本地门禁已完成；但在精确远端commit通过GitHub Actions前，这些结果仍不得作为release provenance或gomtmui consumer输入。
+独立审查曾证明binding生成存在critical provenance缺口：`bindings.to_string()`被校验后，`write_to_file()`可再次通过bindgen默认formatter读取`RUSTFMT`或`PATH/rustfmt`并改写最终文件。当前实现已经禁用外部formatter、单次materialize并直接写入被校验的相同字节，且精确远端commit已经通过GitHub Actions；这些结果仍只完成当前native门禁，不能替代后续cold、release provenance或gomtmui consumer证据。
 
-正式无gate callback当前已经从外部只读config/public JWKS建立每backend snapshot并执行严格ES256、actor、claims、profile-role和requested-role验证。任务6.3的本地改动只补充forbidden-role、配置扩权和真实PostgreSQL probe，没有修改production Rust逻辑；任务6.4至6.6仍需完成production `system_user`往返、稳定脱敏reason和最终无gate artifact门禁。
+正式无gate callback当前已经从外部只读config/public JWKS建立每backend snapshot并执行严格ES256、actor、claims、profile-role和requested-role验证。任务6.3只补充forbidden-role、配置扩权和真实PostgreSQL probe，没有修改production Rust逻辑，并已由远端run `29591036227`验证；任务6.4至6.6仍需完成production `system_user`往返、稳定脱敏reason和最终无gate artifact门禁。
 
 原生 PostgreSQL、Rust、pgrx与多阶段Docker build在本机首次编译耗时较长，且中断的终端输出难以形成持久证据。根`Dockerfile`继续定义唯一build graph，但GitHub Actions必须成为执行该graph、保存日志并判定任务完成的唯一证据权威。本地命令只保留为可选快速诊断，不能完成OpenSpec task、consumer gate或发布门禁。
 
-仓库当前仍为private/free，Actions已经限制为GitHub-owned及批准的Docker actions、强制full-SHA引用、默认token只读，immutable releases已启用；但尚无workflow。所有者已经确认后续会把源码仓库设为public，因此本change必须先完成全历史、工作树、Docker context、workflow与artifact的public-readiness门禁，再由所有者手动改变visibility并复核公开仓库保护能力。
+仓库当前仍为private/free，Actions已经限制为GitHub-owned及批准的Docker actions、强制full-SHA引用、默认token只读，immutable releases已启用；普通Native CI workflow已经存在并通过远端验证，cold与release lane仍未建立。所有者已经确认后续会把源码仓库设为public，因此本change必须先完成全历史、工作树、Docker context、workflow与artifact的public-readiness门禁，再由所有者手动改变visibility并复核公开仓库保护能力。
 
 PostgreSQL 官方契约把 OAuth validator 定义为 `oauth_validator_libraries` 动态加载的 server module：它需要 `PG_MODULE_MAGIC`和`_PG_oauth_validator_module_init`，但不需要 control 文件、SQL schema或`CREATE EXTENSION`。`pgrx 0.19.1`支持PG18并提供module magic、guard、error与allocator接口，但其PG18 bindgen输入没有包含`libpq/oauth.h`，因此不是OAuth ABI的权威包装。
 

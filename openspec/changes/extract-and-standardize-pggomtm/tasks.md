@@ -39,18 +39,18 @@
 
 ## 6. JWT、role与identity接入正式callback
 
-执行顺序调整：当前6.3候选先形成独立可审查commit，但不得用本地Docker结果勾选；随后立即完成7.1远端CI bootstrap，并由精确远端HEAD的Actions成功run完成6.3，再继续6.4至6.6。
+执行顺序调整：6.3候选与7.1 workflow已经分别形成可审查commit，并由精确远端HEAD的Actions成功run完成验证；继续执行6.4至6.6。
 
 - [x] 6.1 把已验证的ES256/JWKS verifier接入无gate feature的正式validate callback，保持固定issuer/audience/database scope、30至300秒TTL和deny-unknown完整claims契约
 - [x] 6.2 覆盖OAuth client与API-key credential actor二选一、authority version、profile、role、ID字符/长度、time、algorithm、audience/scope和tampered signature正负矩阵
-- [ ] 6.3 为已存在的closed ordinary/business-admin/database-developer profile-role映射与startup requested role精确匹配补齐显式unit、config扩权和真实PostgreSQL forbidden-role门禁，拒绝service/migration/cluster/未知role；只有对应远端Actions run通过后才完成，本任务没有发现实现缺口时不得改production Rust逻辑
+- [x] 6.3 为已存在的closed ordinary/business-admin/database-developer profile-role映射与startup requested role精确匹配补齐显式unit、config扩权和真实PostgreSQL forbidden-role门禁，拒绝service/migration/cluster/未知role；只有对应远端Actions run通过后才完成，本任务没有发现实现缺口时不得改production Rust逻辑
 - [ ] 6.4 以无gate production callback和真实libpq OAuth backend证明PostgreSQL allocator与`authn_id -> system_user -> decoded identity`无歧义往返，覆盖OAuth client/API-key actor、三个profile及超长/非法/未知版本拒绝；仅在门禁发现真实缺口时修改实现
 - [ ] 6.5 明确认证失败reason-code的稳定字符串、服务端日志级别与客户端可见性，验证token拒绝、startup错误、panic和PostgreSQL ERROR只产生脱敏类别且不包含JWT、JWKS内容、connection string或完整内部堆栈
 - [ ] 6.6 由远端Actions构建无`abi-gate`、`abi-runtime-gate`、`pgx-oauth-gate`的production artifact，扫描排除内置测试JWKS/key/token、probe symbol/string和测试module，并把本任务限定为module级artifact gate而不重复后续CI/发布供应链门禁
 
 ## 7. 远端GitHub Actions、可重复CI与公开准备
 
-- [ ] 7.1 立即在远端功能ref建立feature push/PR CI bootstrap：只用full-SHA批准actions、read-only token、无secret/无GHCR登录、同ref并发取消和BuildKit GitHub Actions cache运行唯一Docker build graph；先分别提交当前6.3候选与workflow/流程文档，再非force push并用`gh run view/watch/rerun`取得精确remote HEAD证据，本地完整Docker结果不得完成任务
+- [x] 7.1 立即在远端功能ref建立feature push/PR CI bootstrap：只用full-SHA批准actions、read-only token、无secret/无GHCR登录、同ref并发取消和BuildKit GitHub Actions cache运行唯一Docker build graph；先分别提交当前6.3候选与workflow/流程文档，再非force push并用`gh run view/watch/rerun`取得精确remote HEAD证据，本地完整Docker结果不得完成任务
 - [ ] 7.2 增加Cargo依赖、RustSec与许可证审计，对完整pgrx transitive advisory逐项记录理由和复核期限，不使用全局ignore或自动放宽
 - [ ] 7.3 为同一workflow增加`workflow_dispatch`/定时/发布前cold authority模式，从clean checkout无缓存验证固定source/header checksum、base digest、真实loader/OAuth和最终runtime filesystem；常规push/PR继续使用缓存，不能用缓存run冒充cold证据
 - [ ] 7.4 增加不回显敏感值的public-readiness与发布扫描，覆盖全部Git refs/history、tracked/uncommitted文件、workflow源码/log、Docker context/cache、Actions artifact、image、bundle、SBOM/manifest以及GitHub Issue/PR内容；真实命中先轮换并经批准处置，合成fixture只允许精确路径/模式/理由分类且禁止全局ignore
