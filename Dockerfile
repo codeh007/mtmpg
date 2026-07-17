@@ -59,11 +59,42 @@ RUN curl --fail --location --proto '=https' --tlsv1.2 \
       /tmp/cargo-deny.tar.gz \
       /tmp/cargo-deny-0.20.2-x86_64-unknown-linux-musl
 
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends jq xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --fail --location --proto '=https' --tlsv1.2 \
+      --output /tmp/shellcheck.tar.xz \
+      https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz \
+    && echo "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  /tmp/shellcheck.tar.xz" \
+      | sha256sum --check --strict \
+    && tar --extract --xz --file /tmp/shellcheck.tar.xz --directory /tmp \
+    && install --mode=0755 \
+      /tmp/shellcheck-v0.11.0/shellcheck \
+      /usr/local/bin/shellcheck \
+    && shellcheck --version | grep --quiet --fixed-strings 'version: 0.11.0' \
+    && rm -rf /tmp/shellcheck.tar.xz /tmp/shellcheck-v0.11.0
+
 WORKDIR /src
+COPY .dockerignore ./
+COPY .github/workflows/native-ci.yml ./.github/workflows/native-ci.yml
+COPY gitleaks.toml ./
+COPY scripts ./scripts
+
+RUN scripts/public-readiness install-gitleaks /usr/local/bin
+
 COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml deny.toml Dockerfile ./
 COPY examples ./examples
 COPY src ./src
 COPY tests ./tests
+
+RUN shellcheck \
+      scripts/public-readiness \
+      tests/public_readiness_gate.sh \
+      tests/fixtures/public-readiness/fake-gh \
+    && tests/public_readiness_gate.sh /usr/local/bin/gitleaks \
+    && PGGOMTM_GITLEAKS_BIN=/usr/local/bin/gitleaks \
+      scripts/public-readiness scan-path /src
 
 RUN cargo deny \
       --locked \

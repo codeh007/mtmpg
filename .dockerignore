@@ -1,11 +1,18 @@
 # 默认拒绝整个工作树，只开放 Docker 构建所需的最小输入。
 **
+!.dockerignore
 !Dockerfile
+!.github/
+!.github/workflows/
+!.github/workflows/native-ci.yml
 !Cargo.toml
 !Cargo.lock
 !build.rs
 !rust-toolchain.toml
 !deny.toml
+!gitleaks.toml
+!scripts/
+!scripts/**
 !examples/
 !examples/**
 !src/

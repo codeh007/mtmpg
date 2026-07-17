@@ -1,0 +1,644 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+umask 077
+
+readonly EXPECTED_GITLEAKS_VERSION="8.30.1"
+readonly GITLEAKS_ARCHIVE_SHA256="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+readonly GITLEAKS_ARCHIVE_URL="https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz"
+REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly REPOSITORY_ROOT
+readonly GITLEAKS_CONFIG="${REPOSITORY_ROOT}/gitleaks.toml"
+readonly GITLEAKS_BIN="${PGGOMTM_GITLEAKS_BIN:-gitleaks}"
+readonly GH_BIN="${PGGOMTM_GH_BIN:-gh}"
+readonly DOCKER_BIN="${PGGOMTM_DOCKER_BIN:-docker}"
+SCAN_TEMP_ROOT=""
+SESSION_TEMP_ROOT=""
+
+cleanup_scan() {
+  if [[ -n "${SCAN_TEMP_ROOT}" ]]; then
+    rm -rf -- "${SCAN_TEMP_ROOT}"
+    SCAN_TEMP_ROOT=""
+  fi
+}
+
+cleanup() {
+  cleanup_scan
+  if [[ -n "${SESSION_TEMP_ROOT}" ]]; then
+    rm -rf -- "${SESSION_TEMP_ROOT}"
+    SESSION_TEMP_ROOT=""
+  fi
+}
+
+trap cleanup EXIT
+
+fail() {
+  printf 'public-readiness: %s\n' "$1" >&2
+  exit 2
+}
+
+verify_tools() {
+  command -v "${GITLEAKS_BIN}" >/dev/null || \
+    fail "pinned gitleaks binary is unavailable"
+  test "$("${GITLEAKS_BIN}" version)" = "${EXPECTED_GITLEAKS_VERSION}" || \
+    fail "gitleaks version does not match the approved release"
+  command -v jq >/dev/null || fail "jq is required for redacted reporting"
+  test -r "${GITLEAKS_CONFIG}" || fail "gitleaks policy is unavailable"
+}
+
+install_gitleaks() {
+  test "$#" -eq 1 || fail "install-gitleaks requires exactly one destination directory"
+
+  local destination
+  destination="$(realpath --canonicalize-missing -- "$1")" || \
+    fail "gitleaks destination cannot be resolved"
+  [[ "${destination}" != "/" ]] || fail "gitleaks destination cannot be the filesystem root"
+  install -d -m 0755 -- "${destination}"
+
+  cleanup_scan
+  SCAN_TEMP_ROOT="$(mktemp --directory)"
+  local archive="${SCAN_TEMP_ROOT}/gitleaks.tar.gz"
+
+  curl --fail --location --proto '=https' --tlsv1.2 \
+    --silent --show-error \
+    --output "${archive}" \
+    "${GITLEAKS_ARCHIVE_URL}" || fail "approved gitleaks archive could not be downloaded"
+  printf '%s  %s\n' "${GITLEAKS_ARCHIVE_SHA256}" "${archive}" \
+    | sha256sum --check --strict >/dev/null || fail "gitleaks archive checksum does not match"
+  tar --extract --gzip --file "${archive}" --directory "${SCAN_TEMP_ROOT}"
+  install -m 0755 -- "${SCAN_TEMP_ROOT}/gitleaks" "${destination}/gitleaks"
+  test "$("${destination}/gitleaks" version)" = "${EXPECTED_GITLEAKS_VERSION}" || \
+    fail "installed gitleaks version does not match the approved release"
+}
+
+report_findings() {
+  local surface="$1"
+  local report_path="$2"
+
+  jq --exit-status \
+    'all(.[]; .Secret == "REDACTED")' \
+    "${report_path}" >/dev/null || fail "scanner did not fully redact its report"
+
+  jq --compact-output \
+    --arg surface "${surface}" \
+    '{surface: $surface, status: "rejected", findings: length}' \
+    "${report_path}"
+  jq --compact-output \
+    '.[] | {
+      rule_id: .RuleID,
+      file: .File,
+      start_line: .StartLine,
+      end_line: .EndLine,
+      commit: .Commit,
+      fingerprint: .Fingerprint
+    }' \
+    "${report_path}"
+}
+
+run_gitleaks() {
+  local surface="$1"
+  local scanner_command="$2"
+  shift 2
+
+  cleanup_scan
+  SCAN_TEMP_ROOT="$(mktemp --directory)"
+  local report_path="${SCAN_TEMP_ROOT}/report.json"
+  local scanner_log="${SCAN_TEMP_ROOT}/scanner.log"
+
+  local status
+  set +e
+  "${GITLEAKS_BIN}" "${scanner_command}" \
+    --config "${GITLEAKS_CONFIG}" \
+    --gitleaks-ignore-path /dev/null \
+    --ignore-gitleaks-allow \
+    --no-banner \
+    --no-color \
+    --redact=100 \
+    --report-format json \
+    --report-path "${report_path}" \
+    "$@" >"${scanner_log}" 2>&1
+  status=$?
+  set -e
+
+  case "${status}" in
+    0)
+      printf '{"surface":"%s","status":"clean","findings":0}\n' "${surface}"
+      ;;
+    1)
+      test -s "${report_path}" || fail "scanner rejected the target without a report"
+      report_findings "${surface}" "${report_path}"
+      return 1
+      ;;
+    *)
+      fail "scanner could not complete the requested path"
+      ;;
+  esac
+}
+
+scan_path() {
+  test "$#" -eq 1 || fail "scan-path requires exactly one path"
+
+  local target
+  target="$(realpath -- "$1")" || fail "scan target cannot be resolved"
+  test -e "${target}" || fail "scan target does not exist"
+
+  run_gitleaks "path" "dir" "${target}"
+}
+
+scan_source() {
+  test "$#" -eq 1 || fail "scan-source requires exactly one repository path"
+
+  local target
+  target="$(realpath -- "$1")" || fail "repository path cannot be resolved"
+  git -C "${target}" rev-parse --git-dir >/dev/null 2>&1 || \
+    fail "scan-source target is not a Git repository"
+
+  run_gitleaks "git-history" "git" --log-opts=--all "${target}"
+  run_gitleaks "worktree" "dir" "${target}"
+}
+
+scan_bundle() {
+  test "$#" -eq 1 || fail "scan-bundle requires exactly one bundle path"
+
+  local target
+  target="$(realpath -- "$1")" || fail "bundle path cannot be resolved"
+  test -d "${target}" || fail "bundle path is not a directory"
+  test -r "${target}/manifest.json" || fail "bundle manifest is unavailable"
+
+  if find "${target}" -type l -print -quit | grep --quiet .; then
+    fail "bundle must not contain symbolic links"
+  fi
+
+  local manifest="${target}/manifest.json"
+  jq --exit-status '
+    .schema == "pggomtm-public-readiness-bundle/v1"
+    and (.surfaces | type == "object")
+    and ((.surfaces | keys | sort) == ([
+      "actions_artifacts",
+      "actions_caches",
+      "candidate_image",
+      "docker_context",
+      "git_refs_history",
+      "github_issues",
+      "github_pull_requests",
+      "releases_packages",
+      "tracked_uncommitted",
+      "workflow_logs",
+      "workflow_source"
+    ] | sort))
+    and all(.surfaces[];
+      (.status == "materialized" or .status == "absent" or .status == "unresolved")
+      and (.count | type == "number")
+      and (.count >= 0)
+      and ((.count | floor) == .count)
+      and (
+        if .status == "absent" then .count == 0
+        elif .status == "materialized" then .count > 0
+        else .count > 0
+        end
+      )
+    )
+  ' "${manifest}" >/dev/null || fail "bundle manifest violates the v1 contract"
+
+  local surface
+  while IFS= read -r surface; do
+    test -d "${target}/surfaces/${surface}" || \
+      fail "bundle is missing a declared surface directory"
+  done < <(jq --raw-output '.surfaces | keys[]' "${manifest}")
+
+  run_gitleaks \
+    "surface-bundle" \
+    "dir" \
+    --max-archive-depth=3 \
+    --timeout=600 \
+    "${target}"
+
+  local unresolved_count
+  unresolved_count="$(
+    jq '[.surfaces | to_entries[] | select(.value.status == "unresolved")] | length' \
+      "${manifest}"
+  )"
+  if [[ "${unresolved_count}" -ne 0 ]]; then
+    jq --compact-output '
+      .surfaces
+      | to_entries[]
+      | select(.value.status == "unresolved")
+      | {surface: .key, status: .value.status, count: .value.count}
+    ' "${manifest}"
+    return 1
+  fi
+
+  printf '{"surface":"surface-bundle","status":"complete","unresolved":0}\n'
+}
+
+api_to_file() {
+  local endpoint="$1"
+  local filter="$2"
+  local output_path="$3"
+
+  "${GH_BIN}" api "${endpoint}" --paginate --jq "${filter}" \
+    >"${output_path}" 2>>"${SESSION_TEMP_ROOT}/github-api-errors.log"
+}
+
+api_append_to_file() {
+  local endpoint="$1"
+  local filter="$2"
+  local output_path="$3"
+
+  "${GH_BIN}" api "${endpoint}" --paginate --jq "${filter}" \
+    >>"${output_path}" 2>>"${SESSION_TEMP_ROOT}/github-api-errors.log"
+}
+
+api_download() {
+  local endpoint="$1"
+  local output_path="$2"
+  shift 2
+
+  "${GH_BIN}" api "${endpoint}" "$@" \
+    >"${output_path}" 2>>"${SESSION_TEMP_ROOT}/github-api-errors.log"
+}
+
+line_count() {
+  awk 'END { print NR + 0 }' "$1"
+}
+
+status_for_count() {
+  if [[ "$1" -eq 0 ]]; then
+    printf 'absent\n'
+  else
+    printf 'materialized\n'
+  fi
+}
+
+retrospective() {
+  [[ "$#" -ge 1 && "$#" -le 2 ]] || \
+    fail "retrospective requires owner/name and an optional candidate image"
+
+  local repository="$1"
+  [[ "${repository}" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9._-]+$ ]] || \
+    fail "repository must use an owner/name identity"
+
+  local owner="${repository%%/*}"
+  local candidate_image="${2:-}"
+  if [[ -n "${candidate_image}" ]]; then
+    local image_pattern="^ghcr\\.io/${owner}/mtmpg-postgres@sha256:[0-9a-f]{64}$"
+    [[ "${candidate_image}" =~ ${image_pattern} ]] || \
+      fail "candidate image must use the repository owner and a full sha256 digest"
+  fi
+
+  verify_tools
+  command -v "${GH_BIN}" >/dev/null || fail "gh is required for retrospective collection"
+  command -v git >/dev/null || fail "git is required for retrospective collection"
+
+  scan_source "${REPOSITORY_ROOT}"
+
+  SESSION_TEMP_ROOT="$(mktemp --directory)"
+  local bundle_root="${SESSION_TEMP_ROOT}/bundle"
+  local surfaces_root="${bundle_root}/surfaces"
+  local surface
+  for surface in \
+    git_refs_history \
+    tracked_uncommitted \
+    docker_context \
+    workflow_source \
+    workflow_logs \
+    actions_artifacts \
+    actions_caches \
+    releases_packages \
+    github_issues \
+    github_pull_requests \
+    candidate_image; do
+    install -d "${surfaces_root}/${surface}"
+  done
+
+  local mirror="${surfaces_root}/git_refs_history/repository.git"
+  "${GH_BIN}" repo clone "${repository}" "${mirror}" -- --mirror \
+    >/dev/null 2>>"${SESSION_TEMP_ROOT}/github-api-errors.log" || \
+    fail "remote Git refs could not be mirrored"
+  local remote_ref_count
+  remote_ref_count="$(git --git-dir="${mirror}" for-each-ref --format='%(refname)' | awk 'END { print NR + 0 }')"
+  [[ "${remote_ref_count}" -gt 0 ]] || fail "remote mirror did not contain any refs"
+  run_gitleaks "remote-git-history" "git" --log-opts=--all "${mirror}"
+
+  local local_head
+  local_head="$(git -C "${REPOSITORY_ROOT}" rev-parse HEAD)"
+  local worktree_entry_count
+  worktree_entry_count="$(
+    git -C "${REPOSITORY_ROOT}" status --porcelain=v1 --untracked-files=all \
+      | awk 'END { print NR + 0 }'
+  )"
+  jq --null-input --arg head_sha "${local_head}" --argjson entries "${worktree_entry_count}" \
+    '{head_sha: $head_sha, uncommitted_entries: $entries, scanner: "scan-source"}' \
+    >"${surfaces_root}/tracked_uncommitted/summary.json"
+
+  install -m 0600 "${REPOSITORY_ROOT}/.dockerignore" \
+    "${surfaces_root}/docker_context/dockerignore"
+  install -m 0600 "${REPOSITORY_ROOT}/Dockerfile" \
+    "${surfaces_root}/docker_context/Dockerfile"
+
+  local workflow_count
+  workflow_count="$(
+    git -C "${REPOSITORY_ROOT}" ls-files '.github/workflows/**' \
+      | awk 'END { print NR + 0 }'
+  )"
+  [[ "${workflow_count}" -gt 0 ]] || fail "repository has no tracked workflow source"
+  git -C "${REPOSITORY_ROOT}" archive --format=tar HEAD .github/workflows \
+    >"${surfaces_root}/workflow_source/workflows.tar"
+
+  local run_ids="${SESSION_TEMP_ROOT}/run-ids"
+  api_to_file \
+    "repos/${repository}/actions/runs?per_page=100" \
+    '.workflow_runs[].id' \
+    "${run_ids}" || fail "workflow run inventory could not be collected"
+  local run_count
+  run_count="$(line_count "${run_ids}")"
+  local run_failures=0
+  local run_id
+  while IFS= read -r run_id; do
+    [[ "${run_id}" =~ ^[0-9]+$ ]] || fail "workflow inventory returned an invalid run id"
+    if ! api_download \
+      "repos/${repository}/actions/runs/${run_id}/logs" \
+      "${surfaces_root}/workflow_logs/${run_id}.zip"; then
+      run_failures=$((run_failures + 1))
+    fi
+  done <"${run_ids}"
+  local workflow_log_status
+  local workflow_log_manifest_count
+  if [[ "${run_failures}" -gt 0 ]]; then
+    workflow_log_status="unresolved"
+    workflow_log_manifest_count="${run_failures}"
+  else
+    workflow_log_status="$(status_for_count "${run_count}")"
+    workflow_log_manifest_count="${run_count}"
+  fi
+
+  local artifact_rows="${SESSION_TEMP_ROOT}/artifact-rows"
+  api_to_file \
+    "repos/${repository}/actions/artifacts?per_page=100" \
+    '.artifacts[] | [.id, .expired] | @tsv' \
+    "${artifact_rows}" || fail "Actions artifact inventory could not be collected"
+  local artifact_count
+  artifact_count="$(line_count "${artifact_rows}")"
+  local artifact_failures=0
+  local artifact_id
+  local artifact_expired
+  while IFS=$'\t' read -r artifact_id artifact_expired; do
+    [[ "${artifact_id}" =~ ^[0-9]+$ ]] || fail "artifact inventory returned an invalid id"
+    if [[ "${artifact_expired}" = "true" ]] || ! api_download \
+      "repos/${repository}/actions/artifacts/${artifact_id}/zip" \
+      "${surfaces_root}/actions_artifacts/${artifact_id}.zip"; then
+      artifact_failures=$((artifact_failures + 1))
+    fi
+  done <"${artifact_rows}"
+  local artifact_status
+  local artifact_manifest_count
+  if [[ "${artifact_failures}" -gt 0 ]]; then
+    artifact_status="unresolved"
+    artifact_manifest_count="${artifact_failures}"
+  else
+    artifact_status="$(status_for_count "${artifact_count}")"
+    artifact_manifest_count="${artifact_count}"
+  fi
+
+  local cache_inventory="${surfaces_root}/actions_caches/metadata.jsonl"
+  api_to_file \
+    "repos/${repository}/actions/caches?per_page=100" \
+    '.actions_caches[] | {id, key, ref, size_in_bytes, created_at, last_accessed_at} | @json' \
+    "${cache_inventory}" || fail "Actions cache inventory could not be collected"
+  local cache_count
+  cache_count="$(line_count "${cache_inventory}")"
+  local cache_status
+  cache_status="$(status_for_count "${cache_count}")"
+  if [[ "${cache_count}" -gt 0 ]]; then
+    cache_status="unresolved"
+  fi
+
+  local issue_bodies="${surfaces_root}/github_issues/issues.jsonl"
+  local issue_ids="${SESSION_TEMP_ROOT}/issue-ids"
+  api_to_file \
+    "repos/${repository}/issues?state=all&per_page=100" \
+    '.[] | select(has("pull_request") | not) | @json' \
+    "${issue_bodies}" || fail "GitHub Issue inventory could not be collected"
+  api_to_file \
+    "repos/${repository}/issues?state=all&per_page=100" \
+    '.[] | select(has("pull_request") | not) | .number' \
+    "${issue_ids}" || fail "GitHub Issue id inventory could not be collected"
+  local issue_count
+  issue_count="$(line_count "${issue_ids}")"
+  local issue_failures=0
+  local issue_id
+  while IFS= read -r issue_id; do
+    [[ "${issue_id}" =~ ^[0-9]+$ ]] || fail "Issue inventory returned an invalid number"
+    if ! api_append_to_file \
+      "repos/${repository}/issues/${issue_id}/comments?per_page=100" \
+      '.[] | @json' \
+      "${issue_bodies}"; then
+      issue_failures=$((issue_failures + 1))
+    fi
+  done <"${issue_ids}"
+  local issue_status
+  local issue_manifest_count
+  if [[ "${issue_failures}" -gt 0 ]]; then
+    issue_status="unresolved"
+    issue_manifest_count="${issue_failures}"
+  else
+    issue_status="$(status_for_count "${issue_count}")"
+    issue_manifest_count="${issue_count}"
+  fi
+
+  local pull_bodies="${surfaces_root}/github_pull_requests/pulls.jsonl"
+  local pull_ids="${SESSION_TEMP_ROOT}/pull-ids"
+  api_to_file \
+    "repos/${repository}/pulls?state=all&per_page=100" \
+    '.[] | @json' \
+    "${pull_bodies}" || fail "GitHub Pull Request inventory could not be collected"
+  api_to_file \
+    "repos/${repository}/pulls?state=all&per_page=100" \
+    '.[].number' \
+    "${pull_ids}" || fail "GitHub Pull Request id inventory could not be collected"
+  local pull_count
+  pull_count="$(line_count "${pull_ids}")"
+  local pull_failures=0
+  local pull_id
+  while IFS= read -r pull_id; do
+    [[ "${pull_id}" =~ ^[0-9]+$ ]] || fail "Pull Request inventory returned an invalid number"
+    if ! api_append_to_file \
+      "repos/${repository}/issues/${pull_id}/comments?per_page=100" \
+      '.[] | @json' \
+      "${pull_bodies}"; then
+      pull_failures=$((pull_failures + 1))
+    fi
+    if ! api_append_to_file \
+      "repos/${repository}/pulls/${pull_id}/comments?per_page=100" \
+      '.[] | @json' \
+      "${pull_bodies}"; then
+      pull_failures=$((pull_failures + 1))
+    fi
+    if ! api_append_to_file \
+      "repos/${repository}/pulls/${pull_id}/reviews?per_page=100" \
+      '.[] | @json' \
+      "${pull_bodies}"; then
+      pull_failures=$((pull_failures + 1))
+    fi
+    if ! api_append_to_file \
+      "repos/${repository}/pulls/${pull_id}/files?per_page=100" \
+      '.[] | @json' \
+      "${pull_bodies}"; then
+      pull_failures=$((pull_failures + 1))
+    fi
+    if ! api_download \
+      "repos/${repository}/pulls/${pull_id}" \
+      "${surfaces_root}/github_pull_requests/${pull_id}.json"; then
+      pull_failures=$((pull_failures + 1))
+    fi
+  done <"${pull_ids}"
+  local pull_status
+  local pull_manifest_count
+  if [[ "${pull_failures}" -gt 0 ]]; then
+    pull_status="unresolved"
+    pull_manifest_count="${pull_failures}"
+  else
+    pull_status="$(status_for_count "${pull_count}")"
+    pull_manifest_count="${pull_count}"
+  fi
+
+  local releases="${surfaces_root}/releases_packages/releases.jsonl"
+  local packages="${surfaces_root}/releases_packages/packages.jsonl"
+  local release_asset_ids="${SESSION_TEMP_ROOT}/release-asset-ids"
+  api_to_file \
+    "repos/${repository}/releases?per_page=100" \
+    '.[] | @json' \
+    "${releases}" || fail "GitHub Release inventory could not be collected"
+  api_to_file \
+    "repos/${repository}/releases?per_page=100" \
+    '.[].assets[].id' \
+    "${release_asset_ids}" || fail "GitHub Release asset inventory could not be collected"
+  local repository_name="${repository#*/}"
+  api_to_file \
+    "users/${owner}/packages?package_type=container&per_page=100" \
+    ".[] | select(.repository.name == \"${repository_name}\") | @json" \
+    "${packages}" || fail "GitHub package inventory could not be collected"
+  local release_count
+  local package_count
+  release_count="$(line_count "${releases}")"
+  package_count="$(line_count "${packages}")"
+  local release_failures=0
+  local release_asset_id
+  while IFS= read -r release_asset_id; do
+    [[ "${release_asset_id}" =~ ^[0-9]+$ ]] || fail "Release inventory returned an invalid asset id"
+    if ! api_download \
+      "repos/${repository}/releases/assets/${release_asset_id}" \
+      "${surfaces_root}/releases_packages/${release_asset_id}.asset" \
+      -H "Accept: application/octet-stream"; then
+      release_failures=$((release_failures + 1))
+    fi
+  done <"${release_asset_ids}"
+  local releases_packages_count=$((release_count + package_count))
+  local releases_packages_status
+  local releases_packages_manifest_count
+  if [[ "${release_failures}" -gt 0 ]]; then
+    releases_packages_status="unresolved"
+    releases_packages_manifest_count="${release_failures}"
+  else
+    releases_packages_status="$(status_for_count "${releases_packages_count}")"
+    releases_packages_manifest_count="${releases_packages_count}"
+  fi
+
+  local candidate_package_names="${SESSION_TEMP_ROOT}/candidate-package-names"
+  api_to_file \
+    "users/${owner}/packages?package_type=container&per_page=100" \
+    '.[] | select(.name == "mtmpg-postgres") | .name' \
+    "${candidate_package_names}" || fail "candidate package inventory could not be collected"
+  local candidate_package_count
+  candidate_package_count="$(line_count "${candidate_package_names}")"
+  local candidate_status="absent"
+  local candidate_count=0
+  if [[ -n "${candidate_image}" ]]; then
+    command -v "${DOCKER_BIN}" >/dev/null || fail "docker is required to scan a candidate image"
+    "${DOCKER_BIN}" pull --quiet "${candidate_image}" \
+      >"${SESSION_TEMP_ROOT}/docker-pull.log" 2>&1 || fail "candidate image could not be pulled"
+    "${DOCKER_BIN}" save --output \
+      "${surfaces_root}/candidate_image/image.tar" \
+      "${candidate_image}" >"${SESSION_TEMP_ROOT}/docker-save.log" 2>&1 || \
+      fail "candidate image could not be materialized"
+    candidate_status="materialized"
+    candidate_count=1
+  elif [[ "${candidate_package_count}" -gt 0 ]]; then
+    candidate_status="unresolved"
+    candidate_count="${candidate_package_count}"
+  fi
+
+  local manifest="${bundle_root}/manifest.json"
+  jq --null-input \
+    --arg workflow_log_status "${workflow_log_status}" \
+    --arg artifact_status "${artifact_status}" \
+    --arg cache_status "${cache_status}" \
+    --arg issue_status "${issue_status}" \
+    --arg pull_status "${pull_status}" \
+    --arg releases_packages_status "${releases_packages_status}" \
+    --arg candidate_status "${candidate_status}" \
+    --argjson remote_ref_count "${remote_ref_count}" \
+    --argjson workflow_count "${workflow_count}" \
+    --argjson workflow_log_count "${workflow_log_manifest_count}" \
+    --argjson artifact_count "${artifact_manifest_count}" \
+    --argjson cache_count "${cache_count}" \
+    --argjson issue_count "${issue_manifest_count}" \
+    --argjson pull_count "${pull_manifest_count}" \
+    --argjson releases_packages_count "${releases_packages_manifest_count}" \
+    --argjson candidate_count "${candidate_count}" \
+    '{
+      schema: "pggomtm-public-readiness-bundle/v1",
+      surfaces: {
+        git_refs_history: {status: "materialized", count: $remote_ref_count},
+        tracked_uncommitted: {status: "materialized", count: 1},
+        docker_context: {status: "materialized", count: 1},
+        workflow_source: {status: "materialized", count: $workflow_count},
+        workflow_logs: {status: $workflow_log_status, count: $workflow_log_count},
+        actions_artifacts: {status: $artifact_status, count: $artifact_count},
+        actions_caches: {status: $cache_status, count: $cache_count},
+        releases_packages: {status: $releases_packages_status, count: $releases_packages_count},
+        github_issues: {status: $issue_status, count: $issue_count},
+        github_pull_requests: {status: $pull_status, count: $pull_count},
+        candidate_image: {status: $candidate_status, count: $candidate_count}
+      }
+    }' >"${manifest}"
+
+  jq --compact-output \
+    '{surface: "retrospective-inventory", surfaces: .surfaces}' \
+    "${manifest}"
+  scan_bundle "${bundle_root}"
+}
+
+main() {
+  local command="${1:-}"
+  case "${command}" in
+    install-gitleaks)
+      shift
+      install_gitleaks "$@"
+      ;;
+    scan-path)
+      shift
+      verify_tools
+      scan_path "$@"
+      ;;
+    scan-source)
+      shift
+      verify_tools
+      scan_source "$@"
+      ;;
+    scan-bundle)
+      shift
+      verify_tools
+      scan_bundle "$@"
+      ;;
+    retrospective)
+      shift
+      retrospective "$@"
+      ;;
+    *)
+      fail "expected command: install-gitleaks, scan-path, scan-source, scan-bundle, or retrospective"
+      ;;
+  esac
+}
+
+main "$@"

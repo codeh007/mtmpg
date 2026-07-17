@@ -1,0 +1,21 @@
+title = "mtmpg public-readiness policy"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Deterministic synthetic private-key sentinel used only to prove the public-readiness gate; it is not credential material."
+condition = "AND"
+targetRules = ["private-key"]
+regexTarget = "match"
+paths = ['''(?:^|/)tests/fixtures/public-readiness/synthetic-private-key\.pem$''']
+regexes = ['''(?s)^-----BEGIN PRIVATE KEY-----\r?\nbXRtcGctcHVibGljLXJlYWRpbmVzcy1zeW50aGV0aWMtc2VudGluZWw=\r?\n-----END PRIVATE KEY-----\r?\n?$''']
+
+[[allowlists]]
+description = "Immutable historical artifact-gate test literal that rejects private-key markers; the commit contains no PEM key material."
+condition = "AND"
+targetRules = ["private-key"]
+commits = ["0563a822817c107cfb078b501002c035e8b42ee8"]
+regexTarget = "match"
+paths = ['''^tests/production_capability_gate\.rs$''']
+regexes = ['''(?s)-----begin private key-----.*fn artifact_string_violations\(strings: &str\).*fallback_issuer\\nintrospection_endpoint\\n-----BEGIN PRIVATE KEY-----''']
