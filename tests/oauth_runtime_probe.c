@@ -10,6 +10,8 @@
 PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(pggomtm_abi_runtime_probe);
+PG_FUNCTION_INFO_V1(pggomtm_config_missing_probe);
+PG_FUNCTION_INFO_V1(pggomtm_config_snapshot_probe);
 
 #define ABI_RUNTIME_PANIC_SENTINEL ((void *) (uintptr_t) 1)
 #define ABI_RUNTIME_ERROR_SENTINEL ((void *) (uintptr_t) 2)
@@ -271,6 +273,85 @@ pggomtm_abi_runtime_probe(PG_FUNCTION_ARGS)
 					  "shutdown panic");
 	expect_shutdown_error(callbacks, ABI_RUNTIME_ERROR_SENTINEL,
 					  "shutdown PostgreSQL ERROR");
+
+	pfree(library_name);
+	PG_RETURN_BOOL(true);
+}
+
+Datum
+pggomtm_config_missing_probe(PG_FUNCTION_ARGS)
+{
+	char *library_name = text_to_cstring(PG_GETARG_TEXT_PP(0));
+	OAuthValidatorModuleInit validator_init;
+	const OAuthValidatorCallbacks *callbacks;
+	ValidatorModuleState state = {
+		.sversion = PG_VERSION_NUM,
+		.private_data = NULL,
+	};
+	volatile bool rejected = false;
+
+	validator_init = (OAuthValidatorModuleInit)
+		load_external_function(library_name,
+						   "_PG_oauth_validator_module_init",
+						   false,
+						   NULL);
+	callbacks = validator_init();
+	if (!callback_table_is_loadable(callbacks) ||
+		callbacks->startup_cb == NULL || callbacks->shutdown_cb == NULL)
+		ereport(ERROR,
+				(errmsg("pggomtm config gate received invalid callbacks")));
+
+	PG_TRY();
+	{
+		callbacks->startup_cb(&state);
+	}
+	PG_CATCH();
+	{
+		FlushErrorState();
+		rejected = true;
+	}
+	PG_END_TRY();
+
+	if (!rejected || state.private_data != NULL)
+		ereport(ERROR,
+				(errmsg("pggomtm config gate accepted missing runtime material")));
+
+	pfree(library_name);
+	PG_RETURN_BOOL(true);
+}
+
+Datum
+pggomtm_config_snapshot_probe(PG_FUNCTION_ARGS)
+{
+	char *library_name = text_to_cstring(PG_GETARG_TEXT_PP(0));
+	OAuthValidatorModuleInit validator_init;
+	const OAuthValidatorCallbacks *callbacks;
+	ValidatorModuleState state = {
+		.sversion = PG_VERSION_NUM,
+		.private_data = NULL,
+	};
+
+	validator_init = (OAuthValidatorModuleInit)
+		load_external_function(library_name,
+						   "_PG_oauth_validator_module_init",
+						   false,
+						   NULL);
+	callbacks = validator_init();
+	if (!callback_table_is_loadable(callbacks) ||
+		callbacks->startup_cb == NULL || callbacks->shutdown_cb == NULL)
+		ereport(ERROR,
+				(errmsg("pggomtm config gate received invalid callbacks")));
+
+	callbacks->startup_cb(&state);
+	if (state.private_data == NULL ||
+		state.private_data == (void *) &state)
+		ereport(ERROR,
+				(errmsg("pggomtm config gate did not retain an immutable snapshot")));
+
+	callbacks->shutdown_cb(&state);
+	if (state.private_data != NULL)
+		ereport(ERROR,
+				(errmsg("pggomtm config gate did not release its snapshot")));
 
 	pfree(library_name);
 	PG_RETURN_BOOL(true);

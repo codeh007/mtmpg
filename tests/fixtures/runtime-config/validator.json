@@ -1,0 +1,1 @@
+{"schema":"pggomtm-validator-config/v1","issuer":"https://candidate.example.test/oauth/database","audience":"https://candidate.example.test/resources/database/gomtm-test","jwks_path":"/etc/pggomtm/jwks.json"}

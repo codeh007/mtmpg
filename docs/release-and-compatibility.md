@@ -9,7 +9,7 @@
 - `Cargo.toml` 中的 `0.1.0` 只是当前 crate 元数据，不代表已经发布 `v0.1.0`。
 - 仓库尚未创建 stable tag、GitHub Release 或可供部署固定的 GHCR 开放容器计划（Open Container Initiative，OCI）摘要。
 - 正常构建仍保持 `authorized=false`，且不返回 `authn_id`。
-- 当前尚无从外部只读 config 和 JSON Web Key Set（JWKS）建立 verifier 的 production feature。
+- 当前无gate startup已经从外部只读 config 和 JSON Web Key Set（JWKS）建立每backend verifier snapshot，但正式validate callback尚未消费该snapshot。
 - Runtime只接受PostgreSQL 18 major；当前build/test identity仍精确固定18.4，尚未独立构建或验证18.5，因此不得把现有artifact部署到18.5。
 - PG18.4的loader、allocator、callback和真实libpq `OAUTHBEARER`正负向smoke已通过；复验范围与限制见[PG18.4 runtime/OAuth证据](evidence/issue-116/pg18.4-runtime-oauth-smoke.md)。
 - 每个Cargo feature组合已生成并嵌入`pggomtm-build-identity/v1`规范JSON及其SHA-256；该build identity不包含source commit、`.so`或OCI digest，不能替代发布manifest。
@@ -149,7 +149,7 @@ Stable candidate 必须按以下顺序从最终 version commit 晋级：
 
 Stable 表示生产发布门禁全部通过，不表示单项原型测试成功。当前原型不满足以下门禁，因此禁止发布 stable：
 
-- Production feature 从外部只读 config 和 public JWKS 建立 verifier，不依赖内置材料。
+- Production feature 从外部只读 config 和 public JWKS 建立并在正式validate callback中使用 verifier，不依赖内置材料。
 - 最终 artifact 不包含 `abi-gate`、`abi-runtime-gate`、`pgx-oauth-gate`、测试 key、token、probe 或认证 fallback。
 - 精确首发变体通过 native build、应用程序二进制接口（ABI）、loader、allocator 和 callback 门禁。
 - 真实 PostgreSQL 18 OAuth allow 与 deny、role 和 identity 正负向矩阵全部通过。

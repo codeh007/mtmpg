@@ -16,8 +16,8 @@ pub const MAX_TOKEN_TTL_SECONDS: i64 = 300;
 pub const MAX_AUTHN_ID_BYTES: usize = 512;
 
 const MAX_TOKEN_BYTES: usize = 8_192;
-const MAX_JWKS_BYTES: usize = 65_536;
-const MAX_JWKS_KEYS: usize = 16;
+pub const MAX_JWKS_BYTES: usize = 65_536;
+pub const MAX_JWKS_KEYS: usize = 16;
 const MAX_INTERNAL_ID_BYTES: usize = 64;
 const MAX_KEY_ID_BYTES: usize = 128;
 const DATABASE_SCOPE: &str = "database";

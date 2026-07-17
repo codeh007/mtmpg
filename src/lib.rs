@@ -6,6 +6,13 @@ use std::ffi::{c_char, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 
+#[cfg(not(any(
+    feature = "abi-gate",
+    feature = "abi-runtime-gate",
+    feature = "pgx-oauth-gate"
+)))]
+use runtime_config::{ValidatorSnapshot, load_validator_snapshot};
+
 pgrx::pg_module_magic!();
 
 pub mod database_auth;
@@ -79,6 +86,16 @@ unsafe extern "C-unwind" fn validator_startup(state: *mut ValidatorModuleState) 
     let state = unsafe { &mut *state };
     #[cfg(feature = "abi-runtime-gate")]
     let initial_private_data = state.private_data;
+
+    #[cfg(not(any(
+        feature = "abi-gate",
+        feature = "abi-runtime-gate",
+        feature = "pgx-oauth-gate"
+    )))]
+    if !state.private_data.is_null() {
+        pgrx::error!("pggomtm validator state was already initialized");
+    }
+
     state.private_data = ptr::null_mut();
 
     #[cfg(feature = "abi-runtime-gate")]
@@ -96,13 +113,38 @@ unsafe extern "C-unwind" fn validator_startup(state: *mut ValidatorModuleState) 
         pgrx::error!("pggomtm requires PostgreSQL 18");
     }
 
-    state.private_data = state as *mut ValidatorModuleState as *mut c_void;
+    #[cfg(any(
+        feature = "abi-gate",
+        feature = "abi-runtime-gate",
+        feature = "pgx-oauth-gate"
+    ))]
+    {
+        state.private_data = state as *mut ValidatorModuleState as *mut c_void;
+    }
+
+    #[cfg(not(any(
+        feature = "abi-gate",
+        feature = "abi-runtime-gate",
+        feature = "pgx-oauth-gate"
+    )))]
+    {
+        let snapshot = load_validator_snapshot()
+            .unwrap_or_else(|error| pgrx::error!("pggomtm validator startup failed: {error}"));
+        state.private_data = Box::into_raw(Box::new(snapshot)).cast::<c_void>();
+    }
 }
 
 #[cfg_attr(not(feature = "abi-gate"), pgrx::pg_guard)]
 unsafe extern "C-unwind" fn validator_shutdown(state: *mut ValidatorModuleState) {
     if let Some(state) = unsafe { state.as_mut() } {
-        #[cfg(feature = "abi-runtime-gate")]
+        #[cfg(any(
+            feature = "abi-runtime-gate",
+            not(any(
+                feature = "abi-gate",
+                feature = "abi-runtime-gate",
+                feature = "pgx-oauth-gate"
+            ))
+        ))]
         let initial_private_data = state.private_data;
         state.private_data = ptr::null_mut();
 
@@ -113,6 +155,15 @@ unsafe extern "C-unwind" fn validator_shutdown(state: *mut ValidatorModuleState)
                 pgrx::error!("pggomtm ABI runtime shutdown error gate")
             }
             _ => {}
+        }
+
+        #[cfg(not(any(
+            feature = "abi-gate",
+            feature = "abi-runtime-gate",
+            feature = "pgx-oauth-gate"
+        )))]
+        if !initial_private_data.is_null() {
+            drop(unsafe { Box::from_raw(initial_private_data.cast::<ValidatorSnapshot>()) });
         }
     }
 }
@@ -142,7 +193,21 @@ unsafe extern "C-unwind" fn validate_token(
             return false;
         }
 
+        #[cfg(any(
+            feature = "abi-gate",
+            feature = "abi-runtime-gate",
+            feature = "pgx-oauth-gate"
+        ))]
         if state.private_data != state as *const ValidatorModuleState as *mut c_void {
+            return false;
+        }
+
+        #[cfg(not(any(
+            feature = "abi-gate",
+            feature = "abi-runtime-gate",
+            feature = "pgx-oauth-gate"
+        )))]
+        if state.private_data.is_null() {
             return false;
         }
 

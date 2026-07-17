@@ -199,7 +199,11 @@ FROM postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058
 
 COPY --from=build /tmp/pggomtm_abi_gate.so /usr/lib/postgresql/18/lib/pggomtm_abi_gate.so
 COPY --from=build /tmp/pggomtm_abi_runtime_probe.so /usr/lib/postgresql/18/lib/pggomtm_abi_runtime_probe.so
+COPY --from=build /src/target/release/libpggomtm.so /usr/lib/postgresql/18/lib/pggomtm_config_gate.so
 COPY --from=build /src/tests/oauth_runtime_probe.sql /tmp/oauth_runtime_probe.sql
+COPY --from=build /src/tests/runtime_config_missing_probe.sql /tmp/runtime_config_missing_probe.sql
+COPY --from=build /src/tests/runtime_config_ready_probe.sql /tmp/runtime_config_ready_probe.sql
+COPY --from=build /src/tests/fixtures/runtime-config /tmp/runtime-config-fixture
 
 RUN mkdir --mode=0700 /tmp/pggomtm-abi-pgdata \
     && chown postgres:postgres /tmp/pggomtm-abi-pgdata \
@@ -218,6 +222,23 @@ RUN mkdir --mode=0700 /tmp/pggomtm-abi-pgdata \
       --username=postgres \
       --dbname=postgres \
       --file=/tmp/oauth_runtime_probe.sql \
+    && gosu postgres psql \
+      --host=/tmp \
+      --username=postgres \
+      --dbname=postgres \
+      --file=/tmp/runtime_config_missing_probe.sql \
+    && mkdir --mode=0555 /etc/pggomtm \
+    && install --mode=0444 \
+      /tmp/runtime-config-fixture/validator.json \
+      /etc/pggomtm/validator.json \
+    && install --mode=0444 \
+      /tmp/runtime-config-fixture/jwks.json \
+      /etc/pggomtm/jwks.json \
+    && gosu postgres psql \
+      --host=/tmp \
+      --username=postgres \
+      --dbname=postgres \
+      --file=/tmp/runtime_config_ready_probe.sql \
     && gosu postgres pg_ctl \
       --pgdata=/tmp/pggomtm-abi-pgdata \
       --mode=fast \
@@ -225,8 +246,13 @@ RUN mkdir --mode=0700 /tmp/pggomtm-abi-pgdata \
     && rm -rf \
       /tmp/pggomtm-abi-pgdata \
       /tmp/oauth_runtime_probe.sql \
+      /tmp/runtime_config_missing_probe.sql \
+      /tmp/runtime_config_ready_probe.sql \
+      /tmp/runtime-config-fixture \
+      /etc/pggomtm \
       /usr/lib/postgresql/18/lib/pggomtm_abi_gate.so \
       /usr/lib/postgresql/18/lib/pggomtm_abi_runtime_probe.so \
+      /usr/lib/postgresql/18/lib/pggomtm_config_gate.so \
     && touch /tmp/pggomtm-abi-runtime-gate-passed
 
 FROM postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296
@@ -240,6 +266,7 @@ RUN test -r /usr/lib/postgresql/18/lib/pggomtm.so \
     && test -f /tmp/pggomtm-oauth-smoke-passed \
     && test ! -e /usr/lib/postgresql/18/lib/pggomtm_abi_gate.so \
     && test ! -e /usr/lib/postgresql/18/lib/pggomtm_abi_runtime_probe.so \
+    && test ! -e /usr/lib/postgresql/18/lib/pggomtm_config_gate.so \
     && ! grep --binary-files=text --quiet 'pggomtm-abi-allocator' \
       /usr/lib/postgresql/18/lib/pggomtm.so \
     && ! grep --binary-files=text --quiet 'candidate-es256-pgx-gate' \
