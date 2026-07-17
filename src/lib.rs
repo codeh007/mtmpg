@@ -10,6 +10,7 @@ pgrx::pg_module_magic!();
 
 pub mod database_auth;
 pub mod oauth_abi;
+pub mod runtime_config;
 
 pub use oauth_abi::{
     OAuthValidatorCallbacks, OAuthValidatorModuleInit, PG_OAUTH_BINDINGS_SHA256,
