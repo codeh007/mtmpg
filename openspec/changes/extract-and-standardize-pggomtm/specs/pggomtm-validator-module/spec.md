@@ -108,11 +108,11 @@ Validator SHALL 只接受固定ES256、稳定`kid`、唯一issuer/audience、dat
 - **WHEN** 任一ID超长、字符非法、字段组合矛盾或版本未知
 - **THEN** validator SHALL 拒绝连接并只报告稳定脱敏reason类别
 
-### Requirement: 正式artifact不得包含测试gate或活动撤销声明
-Stable artifact MUST以无`abi-gate`、`abi-runtime-gate`、`pgx-oauth-gate`的production feature构建，并 MUST扫描排除内置测试JWKS、signing key、gate token、probe module和fallback路径。Validator SHALL只在连接认证时检查JWT，MUST NOT声称token到期或credential撤销会终止已建立backend。
+### Requirement: Candidate与stable artifact不得包含测试gate或活动撤销声明
+供gomtmui验收的candidate与后续stable artifact MUST以无`abi-gate`、`abi-runtime-gate`、`pgx-oauth-gate`的production feature构建，并 MUST扫描排除内置测试JWKS、signing key、gate token、probe module和fallback路径。Validator SHALL只在连接认证时检查JWT，MUST NOT声称token到期或credential撤销会终止已建立backend。
 
-#### Scenario: 检查stable image
-- **WHEN** release workflow检查最终filesystem、ELF symbol/string和SBOM
+#### Scenario: 检查candidate或stable image
+- **WHEN** trusted candidate或release workflow检查最终filesystem、ELF symbol/string和SBOM
 - **THEN** image SHALL 只包含正式module与公开build metadata，不包含gate能力、测试key、Rust target或secret
 
 #### Scenario: Credential撤销时已有backend
