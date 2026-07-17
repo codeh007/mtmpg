@@ -14,6 +14,7 @@ const APPROVED_MAGIC: u32 = 0x2025_0220;
 const ATTACK_MAGIC: u32 = 0x0bad_cafe;
 const APPROVED_BINDINGS_SHA256: &str =
     "b6f8bf810c467f74a0e43f9019f00cfd517cc881c9b606175818ca1b17204beb";
+const BUILD_IDENTITY_FILE: &str = "pggomtm_build_identity.json";
 const BINDINGS_FILE: &str = "pggomtm_oauth_bindings.rs";
 const TARGET: &str = "x86_64-unknown-linux-gnu";
 const AMBIENT_CLANG_ENV: [&str; 11] = [
@@ -266,6 +267,20 @@ fn real_generator_rejects_unapproved_provenance_inputs() {
         assert_rejected(&rejected, "OAuth header SHA-256 is not approved", name);
     }
 
+    let wrong_target = run_generator(
+        &fixture,
+        &build_script,
+        &official_pg_config,
+        "wrong-target",
+        [("TARGET", OsString::from("aarch64-unknown-linux-gnu"))],
+        fixture.path("clean-cwd"),
+    );
+    assert_rejected(
+        &wrong_target,
+        "Cargo TARGET is not approved for this build variant",
+        "unapproved Cargo target",
+    );
+
     let success = run_generator(
         &fixture,
         &build_script,
@@ -282,6 +297,9 @@ fn real_generator_rejects_unapproved_provenance_inputs() {
         APPROVED_BINDINGS_SHA256,
         "approved generator final OUT_DIR bytes changed"
     );
+    let build_identity = fs::read_to_string(success.out_dir.join(BUILD_IDENTITY_FILE))
+        .expect("read canonical artifact identity");
+    let build_identity_sha256 = format!("{:x}", Sha256::digest(build_identity.as_bytes()));
 
     let rustfmt_probe = fixture.path("rustfmt-env-probe/rustfmt");
     let rustfmt_marker = fixture.path("rustfmt-env-probe-executed");
@@ -331,6 +349,14 @@ fn real_generator_rejects_unapproved_provenance_inputs() {
         )),
         "approved build omitted the final bindings digest: {stdout}"
     );
+    assert!(
+        stdout.contains(&format!(
+            "cargo:rustc-env=PGGOMTM_BUILD_IDENTITY_JSON={build_identity}"
+        )) && stdout.contains(&format!(
+            "cargo:rustc-env=PGGOMTM_BUILD_IDENTITY_SHA256={build_identity_sha256}"
+        )),
+        "approved build omitted the comparable artifact identity: {stdout}"
+    );
     for variable in rerun_environment_names() {
         assert!(
             stdout.contains(&format!("cargo:rerun-if-env-changed={variable}")),
@@ -372,6 +398,8 @@ where
         )
         .env("PGRX_PG_CONFIG_PATH", pg_config)
         .env("RUSTUP_HOME", "/usr/local/rustup")
+        .env("CARGO_FEATURE_ABI_GATE", "1")
+        .env("CARGO_FEATURE_PG18", "1")
         .env("TARGET", TARGET);
     for (key, value) in extra_env {
         command.env(key, value);

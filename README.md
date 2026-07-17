@@ -23,12 +23,14 @@
 | --- | --- | --- |
 | 操作系统与架构 | Linux amd64 | 未验证其他操作系统或架构 |
 | 运行环境 | Debian bookworm、glibc | 未验证其他发行版或 libc |
-| PostgreSQL | 18.4 | [当前源码](src/lib.rs)仍有精确 18.4 runtime gate，其他 PostgreSQL 18 minor 会被拒绝 |
+| PostgreSQL | 18.4 | Runtime 只接受 PostgreSQL 18 major；其他 PG18 minor 尚未经过独立构建与真实验证，不得部署 |
 | Rust | 1.97.1 | 由 `rust-toolchain.toml` 与 Docker 构建固定 |
 | Rust 目标平台 | `x86_64-unknown-linux-gnu` | 未验证其他目标平台 |
 | pgrx | 0.19.1 | `Cargo.toml` 与 `Cargo.lock` 使用精确版本 |
 
-`pg18` 是当前 Cargo feature 名称，不代表所有 PostgreSQL 18 minor 都已获支持。只有 PostgreSQL 18.4 通过了现有源码、头文件与运行门禁。
+`pg18` 是当前 Cargo feature 名称，不代表所有 PostgreSQL 18 minor 都已获部署支持。Runtime major gate允许PG18 stable line，但只有 PostgreSQL 18.4 通过了当前源码、头文件与真实运行门禁。
+
+每个 Cargo feature 组合都会生成规范的 `pggomtm-build-identity/v1` JSON及其 SHA-256，并把两者嵌入对应module。Identity固定Rust、pgrx、JOSE、PostgreSQL source/header/runtime base、target、architecture与libc，可用于比较build变体；它不包含source commit、最终`.so`或OCI digest，因此不是发布用`release-manifest.json`。
 
 ## 从仓库根目录构建和测试
 

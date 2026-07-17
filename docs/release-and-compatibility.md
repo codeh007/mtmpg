@@ -10,7 +10,8 @@
 - 仓库尚未创建 stable tag、GitHub Release 或可供部署固定的 GHCR 开放容器计划（Open Container Initiative，OCI）摘要。
 - 正常构建仍保持 `authorized=false`，且不返回 `authn_id`。
 - 当前尚无从外部只读 config 和 JSON Web Key Set（JWKS）建立 verifier 的 production feature。
-- 当前源码精确要求 PostgreSQL 18.4，尚未支持或验证 PostgreSQL 18.5。
+- Runtime只接受PostgreSQL 18 major；当前build/test identity仍精确固定18.4，尚未独立构建或验证18.5，因此不得把现有artifact部署到18.5。
+- 每个Cargo feature组合已生成并嵌入`pggomtm-build-identity/v1`规范JSON及其SHA-256；该build identity不包含source commit、`.so`或OCI digest，不能替代发布manifest。
 - `release-manifest.json` 与 release workflow 尚未实现。
 
 未来候选和 stable 发布必须满足本文全部适用门禁。任何缺失、未知或不匹配的发布事实都按不兼容处理。
@@ -108,6 +109,8 @@ Git tag、OCI tag 和 `latest` 都只能用于发现。部署必须使用完整 
 上述 64 位十六进制值是明显非真实的格式占位，不对应任何已发布 image。Release、manifest 和部署配置不得包含 registry 凭据。
 
 ## Release manifest 契约
+
+当前build script已经生成较小的`pggomtm-build-identity/v1`，记录module version、feature组合、Rust/pgrx/JOSE、PostgreSQL source/header/bindings/runtime base以及target、OS、architecture和libc。它用于在release pipeline前比较build变体；正式`release-manifest.json`仍必须在后续发布阶段加入remote source commit、test minor、最终`.so`与OCI digest、验证矩阵、SBOM和attestation，且不得把build identity冒充已发布制品身份。
 
 未来 `release-manifest.json` 必须提供不可变、可比较的发布事实。它至少记录以下字段：
 

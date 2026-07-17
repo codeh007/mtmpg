@@ -8,6 +8,8 @@ RUN rustup toolchain install 1.97.1 \
       --component clippy,rustfmt \
       --target x86_64-unknown-linux-gnu \
     && rustup default 1.97.1 \
+    && test "$(rustc --version)" = "rustc 1.97.1 (8bab26f4f 2026-07-14)" \
+    && test "$(cargo --version)" = "cargo 1.97.1 (c980f4866 2026-06-30)" \
     && rustc -Vv \
     && cargo -V
 
@@ -44,7 +46,7 @@ RUN curl --fail --location --proto '=https' --tlsv1.2 \
     && test "$(/opt/postgresql-18.4/bin/pg_config --version)" = "PostgreSQL 18.4"
 
 WORKDIR /src
-COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml ./
+COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml Dockerfile ./
 COPY src ./src
 COPY tests ./tests
 
@@ -64,17 +66,28 @@ RUN cargo test --locked --no-default-features --features pg18,abi-gate \
       --exact real_generator_rejects_unapproved_provenance_inputs
 RUN cargo test --locked --no-default-features --features pg18,abi-gate
 RUN cargo test --locked --no-default-features --features pg18,abi-gate,pgx-oauth-gate \
+      --test artifact_identity \
       --test pgx_oauth_gate
-RUN cargo build --locked --release --no-default-features --features pg18,abi-runtime-gate \
+RUN cargo test --locked --no-default-features --features pg18,abi-runtime-gate \
+      --test artifact_identity \
+    && cargo build --locked --release --no-default-features --features pg18,abi-runtime-gate \
     && cp target/release/libpggomtm.so /tmp/pggomtm_abi_gate.so \
+    && grep --binary-files=text --fixed-strings --quiet \
+      '"features":["pg18","abi-runtime-gate"]' \
+      /tmp/pggomtm_abi_gate.so \
     && cc -std=c11 -Wall -Wextra -Werror -fPIC -shared \
       $(/opt/postgresql-18.4/bin/pg_config --cppflags) \
       -I/opt/postgresql-18.4/include/server \
       tests/oauth_runtime_probe.c \
       -o /tmp/pggomtm_abi_runtime_probe.so
 
-RUN cargo build --locked --release --no-default-features --features pg18 \
+RUN cargo test --locked --no-default-features --features pg18 \
+      --test artifact_identity \
+    && cargo build --locked --release --no-default-features --features pg18 \
     && test -r target/release/libpggomtm.so \
+    && grep --binary-files=text --fixed-strings --quiet \
+      '"features":["pg18"]' \
+      target/release/libpggomtm.so \
     && nm -D target/release/libpggomtm.so \
       | grep --quiet ' _PG_oauth_validator_module_init$'
 
@@ -110,8 +123,13 @@ RUN cargo fmt --check \
 
 FROM build AS pgx-oauth-gate-build
 
-RUN cargo build --locked --release --no-default-features --features pg18,pgx-oauth-gate \
+RUN cargo test --locked --no-default-features --features pg18,pgx-oauth-gate \
+      --test artifact_identity \
+    && cargo build --locked --release --no-default-features --features pg18,pgx-oauth-gate \
     && cp target/release/libpggomtm.so /tmp/pggomtm_pgx_gate.so \
+    && grep --binary-files=text --fixed-strings --quiet \
+      '"features":["pg18","pgx-oauth-gate"]' \
+      /tmp/pggomtm_pgx_gate.so \
     && nm -D /tmp/pggomtm_pgx_gate.so \
       | grep --quiet ' _PG_oauth_validator_module_init$'
 

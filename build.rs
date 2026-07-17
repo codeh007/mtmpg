@@ -10,10 +10,20 @@ use std::process::Command;
 use sha2::{Digest, Sha256};
 
 const APPROVED_POSTGRESQL_VERSION: &str = "PostgreSQL 18.4";
+const APPROVED_POSTGRESQL_SOURCE_SHA256: &str =
+    "81a81ec695fb0c7901407defaa1d2f7973617154cf27ba74e3a7ab8e64436094";
 const APPROVED_OAUTH_HEADER_SHA256: &str =
     "be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bcf";
 const APPROVED_OAUTH_BINDINGS_SHA256: &str =
     "b6f8bf810c467f74a0e43f9019f00cfd517cc881c9b606175818ca1b17204beb";
+const APPROVED_RUNTIME_BASE: &str = "postgres:18.4-bookworm";
+const APPROVED_RUNTIME_BASE_SHA256: &str =
+    "1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296";
+const APPROVED_RUST_VERSION: &str = "1.97.1";
+const APPROVED_PGRX_VERSION: &str = "0.19.1";
+const APPROVED_JOSE_VERSION: &str = "1.0.4";
+const APPROVED_TARGET: &str = "x86_64-unknown-linux-gnu";
+const BUILD_IDENTITY_FILE: &str = "pggomtm_build_identity.json";
 const BINDINGS_FILE: &str = "pggomtm_oauth_bindings.rs";
 const CALLBACK_ABI_PATTERN: &str =
     "^(ValidatorStartupCB|ValidatorShutdownCB|ValidatorValidateCB|OAuthValidatorModuleInit)$";
@@ -55,12 +65,21 @@ const AMBIENT_CLANG_ENV: [&str; 11] = [
     "OBJCPLUS_INCLUDE_PATH",
     "OBJC_INCLUDE_PATH",
 ];
+const FEATURE_ENV: [(&str, &str); 4] = [
+    ("CARGO_FEATURE_PG18", "pg18"),
+    ("CARGO_FEATURE_ABI_GATE", "abi-gate"),
+    ("CARGO_FEATURE_ABI_RUNTIME_GATE", "abi-runtime-gate"),
+    ("CARGO_FEATURE_PGX_OAUTH_GATE", "pgx-oauth-gate"),
+];
 
 type BuildResult<T> = Result<T, Box<dyn Error>>;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=PGRX_PG_CONFIG_PATH");
     println!("cargo:rerun-if-env-changed=TARGET");
+    for (variable, _) in FEATURE_ENV {
+        println!("cargo:rerun-if-env-changed={variable}");
+    }
 
     if let Err(error) = controlled_generate_bindings() {
         panic!("failed to generate the approved PostgreSQL OAuth ABI bindings: {error}");
@@ -69,6 +88,7 @@ fn main() {
 
 fn controlled_generate_bindings() -> BuildResult<()> {
     let target = build_target()?;
+    let features = build_features()?;
     let bindgen_env = bindgen_extra_clang_args_names(&target);
     for variable in bindgen_env
         .iter()
@@ -78,10 +98,10 @@ fn controlled_generate_bindings() -> BuildResult<()> {
         println!("cargo:rerun-if-env-changed={variable}");
     }
     reject_ambient_clang_configuration(&bindgen_env)?;
-    generate_bindings()
+    generate_bindings(&target, &features)
 }
 
-fn generate_bindings() -> BuildResult<()> {
+fn generate_bindings(target: &str, features: &[&str]) -> BuildResult<()> {
     let pg_config = target_pg_config()?;
     println!(
         "cargo:rerun-if-changed={}",
@@ -150,7 +170,8 @@ fn generate_bindings() -> BuildResult<()> {
         ));
     }
 
-    let bindings_path = output_dir()?.join(BINDINGS_FILE);
+    let out_dir = output_dir()?;
+    let bindings_path = out_dir.join(BINDINGS_FILE);
     fs::write(&bindings_path, generated.as_bytes())
         .map_err(|_| build_error("generated OAuth bindings could not be written to OUT_DIR"))?;
     let written = fs::read(&bindings_path)
@@ -163,8 +184,22 @@ fn generate_bindings() -> BuildResult<()> {
         return fail("final OUT_DIR bindings digest differs from the validated bindings digest");
     }
 
+    let build_identity =
+        canonical_build_identity(target, features, &header_sha256, &bindings_sha256);
+    let build_identity_path = out_dir.join(BUILD_IDENTITY_FILE);
+    fs::write(&build_identity_path, build_identity.as_bytes())
+        .map_err(|_| build_error("artifact identity could not be written to OUT_DIR"))?;
+    let written_identity = fs::read(&build_identity_path)
+        .map_err(|_| build_error("artifact identity could not be read from OUT_DIR"))?;
+    if written_identity != build_identity.as_bytes() {
+        return fail("final OUT_DIR artifact identity differs from its canonical bytes");
+    }
+    let build_identity_sha256 = format!("{:x}", Sha256::digest(&written_identity));
+
     println!("cargo:rustc-env=PG_OAUTH_HEADER_SHA256={header_sha256}");
     println!("cargo:rustc-env=PG_OAUTH_BINDINGS_SHA256={bindings_sha256}");
+    println!("cargo:rustc-env=PGGOMTM_BUILD_IDENTITY_JSON={build_identity}");
+    println!("cargo:rustc-env=PGGOMTM_BUILD_IDENTITY_SHA256={build_identity_sha256}");
     Ok(())
 }
 
@@ -285,7 +320,76 @@ fn build_target() -> BuildResult<String> {
     {
         return fail("Cargo TARGET must be one non-empty target identifier");
     }
+    if target != APPROVED_TARGET {
+        return fail("Cargo TARGET is not approved for this build variant");
+    }
     Ok(target)
+}
+
+fn build_features() -> BuildResult<Vec<&'static str>> {
+    let mut features = Vec::new();
+    for (variable, feature) in FEATURE_ENV {
+        if env::var_os(variable).is_some() {
+            features.push(feature);
+        }
+    }
+    if !features.contains(&"pg18") {
+        return fail("the approved build variant requires the pg18 Cargo feature");
+    }
+
+    for (variable, _) in env::vars_os() {
+        let Some(variable) = variable.to_str() else {
+            continue;
+        };
+        if variable.starts_with("CARGO_FEATURE_")
+            && variable != "CARGO_FEATURE_DEFAULT"
+            && !FEATURE_ENV.iter().any(|(allowed, _)| variable == *allowed)
+        {
+            return fail(format!(
+                "Cargo feature {variable} is not approved for an artifact build variant"
+            ));
+        }
+    }
+
+    Ok(features)
+}
+
+fn canonical_build_identity(
+    target: &str,
+    features: &[&str],
+    header_sha256: &str,
+    bindings_sha256: &str,
+) -> String {
+    let features = features
+        .iter()
+        .map(|feature| format!("\"{feature}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        concat!(
+            "{{\"schema\":\"pggomtm-build-identity/v1\",",
+            "\"module_version\":\"{}\",",
+            "\"features\":[{}],",
+            "\"rust\":{{\"version\":\"{}\",\"target\":\"{}\"}},",
+            "\"dependencies\":{{\"pgrx\":\"{}\",\"jose_implementation\":\"jaws\",\"jose_version\":\"{}\"}},",
+            "\"postgresql\":{{\"source_version\":\"18.4\",\"pg_version_num\":180004,",
+            "\"source_sha256\":\"{}\",\"oauth_header_sha256\":\"{}\",",
+            "\"oauth_bindings_sha256\":\"{}\",\"runtime_base\":\"{}\",",
+            "\"runtime_base_sha256\":\"{}\"}},",
+            "\"platform\":{{\"os\":\"linux\",\"arch\":\"amd64\",\"libc\":\"glibc\"}}}}"
+        ),
+        env!("CARGO_PKG_VERSION"),
+        features,
+        APPROVED_RUST_VERSION,
+        target,
+        APPROVED_PGRX_VERSION,
+        APPROVED_JOSE_VERSION,
+        APPROVED_POSTGRESQL_SOURCE_SHA256,
+        header_sha256,
+        bindings_sha256,
+        APPROVED_RUNTIME_BASE,
+        APPROVED_RUNTIME_BASE_SHA256,
+    )
 }
 
 fn bindgen_extra_clang_args_names(target: &str) -> [String; 3] {
