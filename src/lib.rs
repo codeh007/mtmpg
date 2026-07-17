@@ -19,6 +19,11 @@ pub use oauth_abi::{
 
 pub const PG18_VERSION_NUM: i32 = 180_004;
 
+#[cfg(feature = "abi-runtime-gate")]
+const ABI_RUNTIME_PANIC_SENTINEL: usize = 1;
+#[cfg(feature = "abi-runtime-gate")]
+const ABI_RUNTIME_ERROR_SENTINEL: usize = 2;
+
 #[cfg(feature = "pgx-oauth-gate")]
 const PGX_OAUTH_GATE_JWKS: &str = r#"{"keys":[{"kty":"EC","crv":"P-256","alg":"ES256","use":"sig","key_ops":["verify"],"kid":"candidate-es256-pgx-gate","x":"HhhTL9R1TALzBB2cdc6zO4P_2BrHzk_ogsyxyYvFiW4","y":"pGwxHE4v9A3ZajZT5uRURdMt_khuztdcepDGoYiBwKM"}]}"#;
 
@@ -64,7 +69,16 @@ unsafe extern "C-unwind" fn validator_startup(state: *mut ValidatorModuleState) 
     }
 
     let state = unsafe { &mut *state };
+    #[cfg(feature = "abi-runtime-gate")]
+    let initial_private_data = state.private_data;
     state.private_data = ptr::null_mut();
+
+    #[cfg(feature = "abi-runtime-gate")]
+    match initial_private_data.addr() {
+        ABI_RUNTIME_PANIC_SENTINEL => panic!("pggomtm ABI runtime startup panic gate"),
+        ABI_RUNTIME_ERROR_SENTINEL => pgrx::error!("pggomtm ABI runtime startup error gate"),
+        _ => {}
+    }
 
     if !server_version_is_supported(state.sversion) {
         #[cfg(feature = "abi-gate")]
@@ -80,7 +94,18 @@ unsafe extern "C-unwind" fn validator_startup(state: *mut ValidatorModuleState) 
 #[cfg_attr(not(feature = "abi-gate"), pgrx::pg_guard)]
 unsafe extern "C-unwind" fn validator_shutdown(state: *mut ValidatorModuleState) {
     if let Some(state) = unsafe { state.as_mut() } {
+        #[cfg(feature = "abi-runtime-gate")]
+        let initial_private_data = state.private_data;
         state.private_data = ptr::null_mut();
+
+        #[cfg(feature = "abi-runtime-gate")]
+        match initial_private_data.addr() {
+            ABI_RUNTIME_PANIC_SENTINEL => panic!("pggomtm ABI runtime shutdown panic gate"),
+            ABI_RUNTIME_ERROR_SENTINEL => {
+                pgrx::error!("pggomtm ABI runtime shutdown error gate")
+            }
+            _ => {}
+        }
     }
 }
 
@@ -100,7 +125,7 @@ unsafe extern "C-unwind" fn validate_token(
         (*result).authn_id = ptr::null_mut();
     }
 
-    catch_unwind(AssertUnwindSafe(|| {
+    let validation = catch_unwind(AssertUnwindSafe(|| {
         let Some(state) = (unsafe { state.as_ref() }) else {
             return false;
         };
@@ -119,6 +144,10 @@ unsafe extern "C-unwind" fn validate_token(
 
             if token == c"pggomtm-abi-panic" {
                 panic!("pggomtm ABI runtime panic gate");
+            }
+
+            if token == c"pggomtm-abi-error" {
+                pgrx::error!("pggomtm ABI runtime validate error gate");
             }
 
             if token == c"pggomtm-abi-allocator" {
@@ -153,8 +182,19 @@ unsafe extern "C-unwind" fn validate_token(
 
         #[cfg(not(feature = "pgx-oauth-gate"))]
         true
-    }))
-    .unwrap_or(false)
+    }));
+
+    match validation {
+        Ok(authorized) => authorized,
+        Err(error)
+            if error.is::<pgrx::pg_sys::panic::CaughtError>()
+                || error.is::<pgrx::pg_sys::panic::ErrorReport>()
+                || error.is::<pgrx::pg_sys::panic::ErrorReportWithLevel>() =>
+        {
+            std::panic::resume_unwind(error)
+        }
+        Err(_) => false,
+    }
 }
 
 #[cfg_attr(not(feature = "abi-gate"), pgrx::pg_guard)]

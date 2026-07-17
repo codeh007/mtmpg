@@ -1,5 +1,7 @@
 use std::ffi::CString;
 use std::mem::{offset_of, size_of};
+#[cfg(feature = "abi-gate")]
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 
 use pggomtm::{
@@ -78,4 +80,45 @@ fn exact_minor_gate_rejects_other_pg18_servers() {
 #[test]
 fn panic_boundary_converts_unwind_to_internal_failure() {
     assert!(!pggomtm::panic_boundary_for_gate());
+}
+
+#[cfg(feature = "abi-gate")]
+#[test]
+fn callback_null_inputs_fail_closed_without_leaking_result_state() {
+    let callbacks = oauth_callbacks();
+    let startup = callbacks.startup_cb.expect("startup callback");
+    let shutdown = callbacks.shutdown_cb.expect("shutdown callback");
+    let validate = callbacks.validate_cb.expect("validate callback");
+
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| unsafe { startup(ptr::null_mut()) })).is_err(),
+        "abi-gate startup must reject a null state"
+    );
+    unsafe { shutdown(ptr::null_mut()) };
+
+    let mut state = ValidatorModuleState {
+        sversion: PG18_VERSION_NUM,
+        private_data: ptr::null_mut(),
+    };
+    let token = CString::new("header.payload.signature").expect("token");
+    let role = CString::new("gomtm_candidate_ordinary").expect("role");
+    unsafe { startup(&mut state) };
+
+    for (state_ptr, token_ptr, role_ptr) in [
+        (ptr::null(), token.as_ptr(), role.as_ptr()),
+        (&state, ptr::null(), role.as_ptr()),
+        (&state, token.as_ptr(), ptr::null()),
+    ] {
+        let mut result = ValidatorModuleResult {
+            authorized: true,
+            authn_id: ptr::dangling_mut(),
+        };
+        assert!(!unsafe { validate(state_ptr, token_ptr, role_ptr, &mut result) });
+        assert!(!result.authorized);
+        assert!(result.authn_id.is_null());
+    }
+
+    assert!(!unsafe { validate(&state, token.as_ptr(), role.as_ptr(), ptr::null_mut(),) });
+    unsafe { shutdown(&mut state) };
+    assert!(state.private_data.is_null());
 }
