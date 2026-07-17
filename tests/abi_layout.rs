@@ -3,13 +3,18 @@ use std::mem::{offset_of, size_of};
 use std::ptr;
 
 use pggomtm::{
-    OAuthValidatorCallbacks, PG_OAUTH_VALIDATOR_MAGIC, PG18_VERSION_NUM, ValidatorModuleResult,
-    ValidatorModuleState, oauth_callbacks, server_version_is_supported,
+    OAuthValidatorCallbacks, OAuthValidatorModuleInit, PG_OAUTH_HEADER_SHA256,
+    PG_OAUTH_VALIDATOR_MAGIC, PG18_VERSION_NUM, ValidatorModuleResult, ValidatorModuleState,
+    oauth_callbacks, server_version_is_supported,
 };
 
 #[test]
 fn rust_layout_matches_postgresql_18_4_oauth_header() {
     assert_eq!(PG18_VERSION_NUM, 180_004);
+    assert_eq!(
+        PG_OAUTH_HEADER_SHA256,
+        "be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bcf"
+    );
     assert_eq!(PG_OAUTH_VALIDATOR_MAGIC, 0x2025_0220);
 
     assert_eq!(size_of::<ValidatorModuleState>(), 16);
@@ -25,6 +30,12 @@ fn rust_layout_matches_postgresql_18_4_oauth_header() {
     assert_eq!(offset_of!(OAuthValidatorCallbacks, startup_cb), 8);
     assert_eq!(offset_of!(OAuthValidatorCallbacks, shutdown_cb), 16);
     assert_eq!(offset_of!(OAuthValidatorCallbacks, validate_cb), 24);
+}
+
+#[test]
+fn exported_init_uses_the_generated_postgresql_signature() {
+    let init: OAuthValidatorModuleInit = Some(pggomtm::_PG_oauth_validator_module_init);
+    assert!(init.is_some());
 }
 
 #[test]

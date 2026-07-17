@@ -9,9 +9,15 @@ use std::ptr;
 pgrx::pg_module_magic!();
 
 pub mod database_auth;
+pub mod oauth_abi;
+
+pub use oauth_abi::{
+    OAuthValidatorCallbacks, OAuthValidatorModuleInit, PG_OAUTH_HEADER_SHA256,
+    PG_OAUTH_VALIDATOR_MAGIC, ValidatorModuleResult, ValidatorModuleState, ValidatorShutdownCB,
+    ValidatorStartupCB, ValidatorValidateCB,
+};
 
 pub const PG18_VERSION_NUM: i32 = 180_004;
-pub const PG_OAUTH_VALIDATOR_MAGIC: u32 = 0x2025_0220;
 
 #[cfg(feature = "pgx-oauth-gate")]
 const PGX_OAUTH_GATE_JWKS: &str = r#"{"keys":[{"kty":"EC","crv":"P-256","alg":"ES256","use":"sig","key_ops":["verify"],"kid":"candidate-es256-pgx-gate","x":"HhhTL9R1TALzBB2cdc6zO4P_2BrHzk_ogsyxyYvFiW4","y":"pGwxHE4v9A3ZajZT5uRURdMt_khuztdcepDGoYiBwKM"}]}"#;
@@ -28,35 +34,6 @@ pub fn verify_pgx_gate_token(
     )?;
     let verifier = database_auth::DatabaseTokenVerifier::from_jwks(PGX_OAUTH_GATE_JWKS, policy)?;
     Ok(verifier.verify(token, requested_role, now)?.authn_id)
-}
-
-#[repr(C)]
-pub struct ValidatorModuleState {
-    pub sversion: i32,
-    pub private_data: *mut c_void,
-}
-
-#[repr(C)]
-pub struct ValidatorModuleResult {
-    pub authorized: bool,
-    pub authn_id: *mut c_char,
-}
-
-pub type ValidatorStartupCallback = unsafe extern "C-unwind" fn(*mut ValidatorModuleState);
-pub type ValidatorShutdownCallback = unsafe extern "C-unwind" fn(*mut ValidatorModuleState);
-pub type ValidatorValidateCallback = unsafe extern "C-unwind" fn(
-    *const ValidatorModuleState,
-    *const c_char,
-    *const c_char,
-    *mut ValidatorModuleResult,
-) -> bool;
-
-#[repr(C)]
-pub struct OAuthValidatorCallbacks {
-    pub magic: u32,
-    pub startup_cb: Option<ValidatorStartupCallback>,
-    pub shutdown_cb: Option<ValidatorShutdownCallback>,
-    pub validate_cb: Option<ValidatorValidateCallback>,
 }
 
 static OAUTH_CALLBACKS: OAuthValidatorCallbacks = OAuthValidatorCallbacks {
@@ -185,6 +162,8 @@ unsafe extern "C-unwind" fn validate_token(
 pub extern "C-unwind" fn _PG_oauth_validator_module_init() -> *const OAuthValidatorCallbacks {
     oauth_callbacks() as *const OAuthValidatorCallbacks
 }
+
+const _: OAuthValidatorModuleInit = Some(_PG_oauth_validator_module_init);
 
 #[cfg(feature = "abi-gate")]
 #[must_use]

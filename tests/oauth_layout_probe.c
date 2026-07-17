@@ -4,6 +4,9 @@
 
 #include "libpq/oauth.h"
 
+#define TYPE_MATCHES(expression, type) \
+	_Generic((expression), type: 1, default: 0)
+
 _Static_assert(PG_VERSION_NUM == 180004,
                "pggomtm layout probe requires PostgreSQL 18.4 headers");
 _Static_assert(PG_OAUTH_VALIDATOR_MAGIC == 0x20250220,
@@ -33,6 +36,19 @@ _Static_assert(offsetof(OAuthValidatorCallbacks, shutdown_cb) == 16,
                "unexpected OAuthValidatorCallbacks.shutdown_cb offset");
 _Static_assert(offsetof(OAuthValidatorCallbacks, validate_cb) == 24,
                "unexpected OAuthValidatorCallbacks.validate_cb offset");
+
+_Static_assert(TYPE_MATCHES(((OAuthValidatorCallbacks *) 0)->startup_cb,
+                            ValidatorStartupCB),
+               "unexpected ValidatorStartupCB signature");
+_Static_assert(TYPE_MATCHES(((OAuthValidatorCallbacks *) 0)->shutdown_cb,
+                            ValidatorShutdownCB),
+               "unexpected ValidatorShutdownCB signature");
+_Static_assert(TYPE_MATCHES(((OAuthValidatorCallbacks *) 0)->validate_cb,
+                            ValidatorValidateCB),
+               "unexpected ValidatorValidateCB signature");
+_Static_assert(TYPE_MATCHES(&_PG_oauth_validator_module_init,
+                            OAuthValidatorModuleInit),
+               "unexpected OAuthValidatorModuleInit signature");
 
 int
 main(void)

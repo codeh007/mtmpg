@@ -44,7 +44,7 @@ RUN curl --fail --location --proto '=https' --tlsv1.2 \
     && test "$(/opt/postgresql-18.4/bin/pg_config --version)" = "PostgreSQL 18.4"
 
 WORKDIR /src
-COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml ./
 COPY src ./src
 COPY tests ./tests
 

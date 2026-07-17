@@ -790,12 +790,13 @@ name = "pggomtm"
 version = "0.1.0"
 dependencies = [
  "base64ct",
+ "bindgen",
  "jaws",
  "p256",
  "pgrx",
- "pgrx-pg-sys",
  "serde",
  "serde_json",
+ "sha2",
  "url",
 ]
 
