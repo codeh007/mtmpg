@@ -4,14 +4,14 @@
 
 ## 当前状态与加载边界
 
-当前代码只证明模块加载、原生应用程序二进制接口（ABI）边界和离线 JSON Web Token（JWT）验证组件可行，尚未提供可用于生产的完整 validator：
+当前代码已经把模块加载、原生应用程序二进制接口（ABI）边界和离线 JSON Web Token（JWT）验证组件接入正式callback，但完整认证矩阵与发布门禁尚未完成，仍不是可用于生产的完整validator：
 
 - PostgreSQL 通过 `oauth_validator_libraries` 加载该模块。
 - Cargo 把可部署模块构建为 `cdylib` 共享模块，并导出 `PG_MODULE_MAGIC` 与 `_PG_oauth_validator_module_init`。
 - 该模块不是 SQL extension，不需要 control 文件、versioned SQL 或 `CREATE EXTENSION`。
 - 生产交付不得使用 `cargo pgrx install` 或 `cargo pgrx package`。
 - 当前无 gate 的最终制品要求每个新 OAuth backend 在 startup 从固定只读路径建立独立 config/public JWKS snapshot；材料缺失、损坏、可写或不满足同目录同文件系统的原子发布布局时 startup fail closed。
-- 正式 validate callback 尚未消费该 snapshot，会保持 `authorized=false` 且不返回 `authn_id`，因此拒绝所有 token。
+- 正式 validate callback 消费该 snapshot，严格验证ES256签名、唯一issuer/audience、database scope、30至300秒TTL与deny-unknown claims；合法候选token返回PostgreSQL allocator分配的版本化`authn_id`，tampered或不合规token保持未授权。
 - Production build对normal dependency tree、production源码、ELF `DT_NEEDED`、未解析符号和敏感字符串执行离线能力门禁，拒绝HTTP/DNS、libcurl/libpq、SQL/SPI、私钥加载、service credential、在线introspection和issuer fallback入口。
 - `abi-gate`、`abi-runtime-gate` 与 `pgx-oauth-gate` 只用于测试。内置的确定性 key、公开 JSON Web Key Set（JWKS）和 token fixture 不得用于生产。
 
@@ -36,7 +36,7 @@ PG18.4的loader、allocator、callback及真实libpq `OAUTHBEARER`正负向smoke
 
 每个 Cargo feature 组合都会生成规范的 `pggomtm-build-identity/v1` JSON及其 SHA-256，并把两者嵌入对应module。Identity固定Rust、pgrx、JOSE、PostgreSQL source/header/runtime base、target、architecture与libc，可用于比较build变体；它不包含source commit、最终`.so`或OCI digest，因此不是发布用`release-manifest.json`。
 
-正式validator只允许读取[固定路径下的版本化runtime配置](docs/runtime-configuration.md)。当前已实现每个新backend的只读config/public JWKS加载、严格校验、同文件系统原子替换布局、独立snapshot持有与shutdown释放；后续backend读取新snapshot，既有backend不reload。正式validate callback尚未接入snapshot，因此默认artifact继续拒绝所有token。
+正式validator只允许读取[固定路径下的版本化runtime配置](docs/runtime-configuration.md)。当前已实现每个新backend的只读config/public JWKS加载、严格校验、同文件系统原子替换布局、独立snapshot持有与shutdown释放；后续backend读取新snapshot，既有backend不reload。正式validate callback已经接入snapshot并通过真实PG18.4 valid/tampered token smoke；更完整的actor、role、identity与脱敏失败矩阵仍是后续门禁。
 
 ## 从仓库根目录构建和测试
 
@@ -69,14 +69,14 @@ DOCKER_BUILDKIT=1 docker build \
 
 ## 只用于候选验证的安装
 
-当前仓库没有生产支持的稳定制品。以下步骤只适用于与支持矩阵完全相同的隔离候选环境；它要求先按[运行时配置契约](docs/runtime-configuration.md)提供只读材料，启动成功后仍会拒绝所有 token：
+当前仓库没有生产支持的稳定制品。以下步骤只适用于与支持矩阵完全相同的隔离候选环境；它要求先按[运行时配置契约](docs/runtime-configuration.md)提供只读材料，并只用于验证当前正式callback的候选allow/deny行为：
 
 1. 确认本页构建命令已经生成 `pggomtm-candidate:local` final image。
 2. 停止整个候选 PostgreSQL 实例，确保没有 backend 已加载旧 `.so`。
 3. 从 final image 创建临时 container，并从当前 final 路径复制 `pggomtm.so`。
 4. 删除临时 container，验证目标 `pg_config` 报告 PostgreSQL 18.4，再把 module 安装到真实 `pkglibdir`。
 5. 在固定路径提供权限正确的候选config/public JWKS，并在 `postgresql.conf` 中配置 validator library。
-6. 启动或重建全部 backend，确认startup建立snapshot，再运行候选拒绝路径验证。
+6. 启动或重建全部 backend，确认startup建立snapshot，再运行候选allow/deny路径验证。
 
 在实例停止后执行以下提取与安装命令。清理函数会在命令失败时删除临时 container 和目录：
 

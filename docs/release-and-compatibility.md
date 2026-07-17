@@ -1,6 +1,6 @@
 # pggomtm 发布与兼容契约
 
-本页定义 `pggomtm` 未来发布必须遵守的版本、制品、兼容、晋级和回退契约。当前仓库尚无 stable、GitHub Release、GitHub Container Registry（GHCR）摘要或 production verifier。当前代码仍是只验证 PostgreSQL 18.4、无 gate 制品默认拒绝全部 token 的原型，后续条款不代表对应能力已经实现。
+本页定义 `pggomtm` 未来发布必须遵守的版本、制品、兼容、晋级和回退契约。当前仓库尚无 stable、GitHub Release或GitHub Container Registry（GHCR）摘要。当前代码已在PostgreSQL 18.4接入无gate production verifier并通过首个valid/tampered token smoke，但完整认证、制品与发布门禁仍未完成；后续条款不代表对应能力已经实现。
 
 ## 当前状态与本文效力
 
@@ -8,8 +8,8 @@
 
 - `Cargo.toml` 中的 `0.1.0` 只是当前 crate 元数据，不代表已经发布 `v0.1.0`。
 - 仓库尚未创建 stable tag、GitHub Release 或可供部署固定的 GHCR 开放容器计划（Open Container Initiative，OCI）摘要。
-- 正常构建仍保持 `authorized=false`，且不返回 `authn_id`。
-- 当前无gate startup已经从外部只读 config 和 JSON Web Key Set（JWKS）建立每backend verifier snapshot，并验证同文件系统原子轮换与既有snapshot隔离；正式validate callback尚未消费该snapshot。
+- 正常构建在外部材料和claims全部合规时授权并返回PostgreSQL allocator分配的版本化`authn_id`，tampered或不合规token保持未授权。
+- 当前无gate startup已经从外部只读 config 和 JSON Web Key Set（JWKS）建立每backend verifier snapshot，验证同文件系统原子轮换与既有snapshot隔离，并由正式validate callback消费该snapshot。
 - Production build已经验证normal dependency tree、production源码、ELF动态依赖/未解析符号与敏感字符串不包含HTTP/DNS、libcurl/libpq、SQL/SPI、私钥加载、service credential、在线introspection或issuer fallback能力。
 - Runtime只接受PostgreSQL 18 major；当前build/test identity仍精确固定18.4，尚未独立构建或验证18.5，因此不得把现有artifact部署到18.5。
 - PG18.4的loader、allocator、callback和真实libpq `OAUTHBEARER`正负向smoke已通过；复验范围与限制见[PG18.4 runtime/OAuth证据](evidence/issue-116/pg18.4-runtime-oauth-smoke.md)。

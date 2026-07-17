@@ -216,7 +216,9 @@ COPY --from=build /src/target/release/libpggomtm.so /usr/lib/postgresql/18/lib/p
 COPY --from=build /src/tests/oauth_runtime_probe.sql /tmp/oauth_runtime_probe.sql
 COPY --from=build /src/tests/runtime_config_missing_probe.sql /tmp/runtime_config_missing_probe.sql
 COPY --from=build /src/tests/runtime_config_ready_probe.sql /tmp/runtime_config_ready_probe.sql
+COPY --from=build /src/tests/runtime_config_validate_probe.sql /tmp/runtime_config_validate_probe.sql
 COPY --from=build /src/tests/fixtures/runtime-config /tmp/runtime-config-fixture
+COPY --from=pgx-oauth-gate-build /tmp/pggomtm_oauth_smoke_token /tmp/pggomtm_oauth_smoke_token
 
 RUN mkdir --mode=0700 /tmp/pggomtm-abi-pgdata \
     && chown postgres:postgres /tmp/pggomtm-abi-pgdata \
@@ -247,11 +249,22 @@ RUN mkdir --mode=0700 /tmp/pggomtm-abi-pgdata \
     && install --mode=0444 \
       /tmp/runtime-config-fixture/jwks.json \
       /etc/pggomtm/jwks.json \
+    && /tmp/pggomtm_oauth_smoke_token \
+      /tmp/pggomtm-config-valid.jwt \
+      /tmp/pggomtm-config-tampered.jwt \
+    && chmod 0444 \
+      /tmp/pggomtm-config-valid.jwt \
+      /tmp/pggomtm-config-tampered.jwt \
     && gosu postgres psql \
       --host=/tmp \
       --username=postgres \
       --dbname=postgres \
       --file=/tmp/runtime_config_ready_probe.sql \
+    && gosu postgres psql \
+      --host=/tmp \
+      --username=postgres \
+      --dbname=postgres \
+      --file=/tmp/runtime_config_validate_probe.sql \
     && gosu postgres pg_ctl \
       --pgdata=/tmp/pggomtm-abi-pgdata \
       --mode=fast \
@@ -261,7 +274,11 @@ RUN mkdir --mode=0700 /tmp/pggomtm-abi-pgdata \
       /tmp/oauth_runtime_probe.sql \
       /tmp/runtime_config_missing_probe.sql \
       /tmp/runtime_config_ready_probe.sql \
+      /tmp/runtime_config_validate_probe.sql \
       /tmp/runtime-config-fixture \
+      /tmp/pggomtm-config-valid.jwt \
+      /tmp/pggomtm-config-tampered.jwt \
+      /tmp/pggomtm_oauth_smoke_token \
       /etc/pggomtm \
       /usr/lib/postgresql/18/lib/pggomtm_abi_gate.so \
       /usr/lib/postgresql/18/lib/pggomtm_abi_runtime_probe.so \

@@ -2,6 +2,12 @@
 use std::ffi::CStr;
 #[cfg(feature = "pgx-oauth-gate")]
 use std::ffi::CString;
+#[cfg(not(any(
+    feature = "abi-gate",
+    feature = "abi-runtime-gate",
+    feature = "pgx-oauth-gate"
+)))]
+use std::ffi::{CStr, CString};
 use std::ffi::{c_char, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
@@ -230,7 +236,14 @@ unsafe extern "C-unwind" fn validate_token(
             }
         }
 
-        #[cfg(feature = "pgx-oauth-gate")]
+        #[cfg(any(
+            feature = "pgx-oauth-gate",
+            not(any(
+                feature = "abi-gate",
+                feature = "abi-runtime-gate",
+                feature = "pgx-oauth-gate"
+            ))
+        ))]
         {
             let token = unsafe { CStr::from_ptr(token) };
             let role = unsafe { CStr::from_ptr(role) };
@@ -241,9 +254,25 @@ unsafe extern "C-unwind" fn validate_token(
                 return false;
             };
             let now = i64::try_from(now.as_secs()).unwrap_or(i64::MAX);
+
+            #[cfg(feature = "pgx-oauth-gate")]
             let Ok(authn_id) = verify_pgx_gate_token(token, role, now) else {
                 return true;
             };
+
+            #[cfg(not(any(
+                feature = "abi-gate",
+                feature = "abi-runtime-gate",
+                feature = "pgx-oauth-gate"
+            )))]
+            let authn_id = {
+                let snapshot = unsafe { &*state.private_data.cast::<ValidatorSnapshot>() };
+                let Ok(verified) = snapshot.verify(token, role, now) else {
+                    return true;
+                };
+                verified.authn_id
+            };
+
             let Ok(authn_id) = CString::new(authn_id) else {
                 return false;
             };
@@ -253,7 +282,10 @@ unsafe extern "C-unwind" fn validate_token(
             result.authorized
         }
 
-        #[cfg(not(feature = "pgx-oauth-gate"))]
+        #[cfg(all(
+            not(feature = "pgx-oauth-gate"),
+            any(feature = "abi-gate", feature = "abi-runtime-gate")
+        ))]
         true
     }));
 

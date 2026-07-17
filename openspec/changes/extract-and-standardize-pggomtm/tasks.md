@@ -39,7 +39,7 @@
 
 ## 6. JWT、role与identity接入正式callback
 
-- [ ] 6.1 把已验证的ES256/JWKS verifier接入无gate feature的正式validate callback，保持固定issuer/audience/database scope、30至300秒TTL和deny-unknown完整claims契约
+- [x] 6.1 把已验证的ES256/JWKS verifier接入无gate feature的正式validate callback，保持固定issuer/audience/database scope、30至300秒TTL和deny-unknown完整claims契约
 - [ ] 6.2 覆盖OAuth client与API-key credential actor二选一、authority version、profile、role、ID字符/长度、time、algorithm、audience/scope和tampered signature正负矩阵
 - [ ] 6.3 实现closed ordinary/business-admin/database-developer profile-role映射与startup requested role精确匹配，拒绝service/migration/cluster/未知role及配置扩权
 - [ ] 6.4 把版本化`authn_id`接入PostgreSQL allocator，覆盖`authn_id -> system_user -> decoded identity`无歧义往返和超长/非法/未知版本拒绝

@@ -12,6 +12,7 @@ PG_MODULE_MAGIC;
 PG_FUNCTION_INFO_V1(pggomtm_abi_runtime_probe);
 PG_FUNCTION_INFO_V1(pggomtm_config_missing_probe);
 PG_FUNCTION_INFO_V1(pggomtm_config_snapshot_probe);
+PG_FUNCTION_INFO_V1(pggomtm_config_validate_probe);
 
 #define ABI_RUNTIME_PANIC_SENTINEL ((void *) (uintptr_t) 1)
 #define ABI_RUNTIME_ERROR_SENTINEL ((void *) (uintptr_t) 2)
@@ -354,5 +355,72 @@ pggomtm_config_snapshot_probe(PG_FUNCTION_ARGS)
 				(errmsg("pggomtm config gate did not release its snapshot")));
 
 	pfree(library_name);
+	PG_RETURN_BOOL(true);
+}
+
+Datum
+pggomtm_config_validate_probe(PG_FUNCTION_ARGS)
+{
+	char *library_name = text_to_cstring(PG_GETARG_TEXT_PP(0));
+	char *token = text_to_cstring(PG_GETARG_TEXT_PP(1));
+	char *role = text_to_cstring(PG_GETARG_TEXT_PP(2));
+	bool expected_authorized = PG_GETARG_BOOL(3);
+	OAuthValidatorModuleInit validator_init;
+	const OAuthValidatorCallbacks *callbacks;
+	ValidatorModuleState state = {
+		.sversion = PG_VERSION_NUM,
+		.private_data = NULL,
+	};
+	ValidatorModuleResult result = {
+		.authorized = false,
+		.authn_id = NULL,
+	};
+	bool completed;
+	bool authorized;
+	bool identity_present;
+	bool identity_prefix_valid = false;
+
+	validator_init = (OAuthValidatorModuleInit)
+		load_external_function(library_name,
+						   "_PG_oauth_validator_module_init",
+						   false,
+						   NULL);
+	callbacks = validator_init();
+	if (!callback_table_is_loadable(callbacks) ||
+		callbacks->startup_cb == NULL || callbacks->shutdown_cb == NULL)
+		ereport(ERROR,
+				(errmsg("pggomtm production validate gate received invalid callbacks")));
+
+	callbacks->startup_cb(&state);
+	completed = callbacks->validate_cb(&state, token, role, &result);
+	authorized = result.authorized;
+	identity_present = result.authn_id != NULL;
+	if (identity_present)
+		identity_prefix_valid =
+			strncmp(result.authn_id, "pggomtm:v1;", strlen("pggomtm:v1;")) == 0;
+
+	if (result.authn_id != NULL)
+		pfree(result.authn_id);
+	callbacks->shutdown_cb(&state);
+	pfree(role);
+	pfree(token);
+	pfree(library_name);
+
+	if (!completed)
+		ereport(ERROR,
+				(errmsg("pggomtm production validate gate reported an internal failure")));
+	if (authorized != expected_authorized)
+		ereport(ERROR,
+				(errmsg("pggomtm production validate gate returned the wrong authorization result")));
+	if (expected_authorized && (!identity_present || !identity_prefix_valid))
+		ereport(ERROR,
+				(errmsg("pggomtm production validate gate returned an invalid identity")));
+	if (!expected_authorized && identity_present)
+		ereport(ERROR,
+				(errmsg("pggomtm production validate gate leaked identity on rejection")));
+	if (state.private_data != NULL)
+		ereport(ERROR,
+				(errmsg("pggomtm production validate gate did not release its snapshot")));
+
 	PG_RETURN_BOOL(true);
 }
