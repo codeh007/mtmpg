@@ -10,7 +10,7 @@
 - Cargo 把可部署模块构建为 `cdylib` 共享模块，并导出 `PG_MODULE_MAGIC` 与 `_PG_oauth_validator_module_init`。
 - 该模块不是 SQL extension，不需要 control 文件、versioned SQL 或 `CREATE EXTENSION`。
 - 生产交付不得使用 `cargo pgrx install` 或 `cargo pgrx package`。
-- 当前无 gate 的最终制品要求每个新 OAuth backend 在 startup 从固定只读路径建立独立 config/public JWKS snapshot；材料缺失、损坏或可写时 startup fail closed。
+- 当前无 gate 的最终制品要求每个新 OAuth backend 在 startup 从固定只读路径建立独立 config/public JWKS snapshot；材料缺失、损坏、可写或不满足同目录同文件系统的原子发布布局时 startup fail closed。
 - 正式 validate callback 尚未消费该 snapshot，会保持 `authorized=false` 且不返回 `authn_id`，因此拒绝所有 token。
 - `abi-gate`、`abi-runtime-gate` 与 `pgx-oauth-gate` 只用于测试。内置的确定性 key、公开 JSON Web Key Set（JWKS）和 token fixture 不得用于生产。
 
@@ -35,7 +35,7 @@ PG18.4的loader、allocator、callback及真实libpq `OAUTHBEARER`正负向smoke
 
 每个 Cargo feature 组合都会生成规范的 `pggomtm-build-identity/v1` JSON及其 SHA-256，并把两者嵌入对应module。Identity固定Rust、pgrx、JOSE、PostgreSQL source/header/runtime base、target、architecture与libc，可用于比较build变体；它不包含source commit、最终`.so`或OCI digest，因此不是发布用`release-manifest.json`。
 
-正式validator只允许读取[固定路径下的版本化runtime配置](docs/runtime-configuration.md)。当前已实现每个新backend的只读config/public JWKS加载、严格校验、独立snapshot持有与shutdown释放；正式validate callback尚未接入snapshot，因此默认artifact继续拒绝所有token。
+正式validator只允许读取[固定路径下的版本化runtime配置](docs/runtime-configuration.md)。当前已实现每个新backend的只读config/public JWKS加载、严格校验、同文件系统原子替换布局、独立snapshot持有与shutdown释放；后续backend读取新snapshot，既有backend不reload。正式validate callback尚未接入snapshot，因此默认artifact继续拒绝所有token。
 
 ## 从仓库根目录构建和测试
 

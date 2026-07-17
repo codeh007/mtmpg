@@ -1,9 +1,10 @@
 use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use jaws::Token;
+use jaws::key::JsonWebKey;
 use p256::ecdsa::{Signature, SigningKey};
 use serde_json::{Value, json};
 
@@ -82,6 +83,108 @@ fn valid_read_only_config_and_public_jwks_create_a_snapshot() {
     fixture.write_valid();
 
     fixture.load().expect("valid immutable verifier snapshot");
+}
+
+#[test]
+fn materials_in_different_directories_are_rejected() {
+    let config_fixture = Fixture::new();
+    let jwks_fixture = Fixture::new();
+    config_fixture.write_config(valid_config());
+    jwks_fixture.write_jwks(VALID_PUBLIC_JWKS.as_bytes());
+
+    assert_eq!(
+        load_validator_snapshot_from_paths(&config_fixture.config, &jwks_fixture.jwks)
+            .expect_err("config and JWKS outside one directory must fail closed"),
+        RuntimeConfigError::UnsafePublicationLayout
+    );
+}
+
+#[test]
+fn material_directory_symlink_is_rejected() {
+    let fixture = Fixture::new();
+    let real_directory = fixture.root.join("real");
+    let linked_directory = fixture.root.join("linked");
+    fs::create_dir(&real_directory).expect("create real material directory");
+    write_read_only(
+        &real_directory.join("validator.json"),
+        &serde_json::to_vec(&valid_config()).expect("serialize config fixture"),
+    );
+    write_read_only(
+        &real_directory.join("jwks.json"),
+        VALID_PUBLIC_JWKS.as_bytes(),
+    );
+    symlink(&real_directory, &linked_directory).expect("link material directory");
+
+    assert_eq!(
+        load_validator_snapshot_from_paths(
+            &linked_directory.join("validator.json"),
+            &linked_directory.join("jwks.json"),
+        )
+        .expect_err("a symlinked publication directory must fail closed"),
+        RuntimeConfigError::UnsafePublicationLayout
+    );
+}
+
+#[test]
+fn atomic_jwks_rotation_isolated_existing_and_later_backend_snapshots() {
+    let fixture = Fixture::new();
+    let retiring_key = signing_key(7);
+    let active_key = signing_key(9);
+    let retiring_kid = "candidate-es256-retiring";
+    let active_kid = "candidate-es256-active";
+    let retiring_token = signed_token_with_key(retiring_kid, &retiring_key);
+    let active_token = signed_token_with_key(active_kid, &active_key);
+
+    fixture.write_config(valid_config());
+    fixture.write_jwks(
+        &serde_json::to_vec(&jwks_with(vec![jwk_value(&retiring_key, retiring_kid)]))
+            .expect("serialize retiring-key JWKS"),
+    );
+    let existing_backend = fixture.load().expect("existing backend snapshot");
+    assert_snapshot_accepts(&existing_backend, &retiring_token);
+    assert_snapshot_rejects_unknown_key(&existing_backend, &active_token);
+
+    let staged_jwks = fixture.root.join(".jwks.json.next");
+    write_read_only(&staged_jwks, br#"{"keys":["#);
+    let backend_while_publisher_is_writing = fixture
+        .load()
+        .expect("active name must still expose the complete retiring-key snapshot");
+    assert_snapshot_accepts(&backend_while_publisher_is_writing, &retiring_token);
+    assert_snapshot_rejects_unknown_key(&backend_while_publisher_is_writing, &active_token);
+
+    let active_and_retiring = jwks_with(vec![
+        jwk_value(&active_key, active_kid),
+        jwk_value(&retiring_key, retiring_kid),
+    ]);
+    write_read_only(
+        &staged_jwks,
+        &serde_json::to_vec(&active_and_retiring).expect("serialize rotating JWKS"),
+    );
+    let old_metadata = fs::metadata(&fixture.jwks).expect("old active JWKS metadata");
+    let staged_metadata = fs::metadata(&staged_jwks).expect("staged JWKS metadata");
+    assert_eq!(old_metadata.dev(), staged_metadata.dev());
+    fs::rename(&staged_jwks, &fixture.jwks).expect("atomically publish rotating JWKS");
+    let rotating_metadata = fs::metadata(&fixture.jwks).expect("rotating JWKS metadata");
+    assert_eq!(old_metadata.dev(), rotating_metadata.dev());
+    assert_ne!(old_metadata.ino(), rotating_metadata.ino());
+
+    let later_backend = fixture.load().expect("later backend rotating snapshot");
+    assert_snapshot_accepts(&later_backend, &active_token);
+    assert_snapshot_accepts(&later_backend, &retiring_token);
+    assert_snapshot_rejects_unknown_key(&existing_backend, &active_token);
+
+    write_read_only(
+        &staged_jwks,
+        &serde_json::to_vec(&jwks_with(vec![jwk_value(&active_key, active_kid)]))
+            .expect("serialize active-only JWKS"),
+    );
+    fs::rename(&staged_jwks, &fixture.jwks).expect("atomically retire old key");
+
+    let newest_backend = fixture.load().expect("newest backend active snapshot");
+    assert_snapshot_accepts(&newest_backend, &active_token);
+    assert_snapshot_rejects_unknown_key(&newest_backend, &retiring_token);
+    assert_snapshot_accepts(&existing_backend, &retiring_token);
+    assert_snapshot_accepts(&later_backend, &retiring_token);
 }
 
 #[test]
@@ -299,6 +402,29 @@ fn assert_load_error(fixture: &Fixture, expected: RuntimeConfigError) {
 }
 
 fn signed_token(kid: &str) -> String {
+    signed_token_with_key(kid, &signing_key(7))
+}
+
+fn signing_key(byte: u8) -> SigningKey {
+    SigningKey::from_slice(&[byte; 32]).expect("fixed synthetic signing fixture")
+}
+
+fn jwk_value(key: &SigningKey, kid: &str) -> Value {
+    let mut value =
+        serde_json::to_value(JsonWebKey::build(key.verifying_key())).expect("serialize public JWK");
+    let object = value.as_object_mut().expect("JWK object");
+    object.insert("alg".into(), json!("ES256"));
+    object.insert("key_ops".into(), json!(["verify"]));
+    object.insert("kid".into(), json!(kid));
+    object.insert("use".into(), json!("sig"));
+    value
+}
+
+fn jwks_with(keys: Vec<Value>) -> Value {
+    json!({ "keys": keys })
+}
+
+fn signed_token_with_key(kid: &str, key: &SigningKey) -> String {
     let claims = DatabaseTokenClaims {
         issuer: ISSUER.into(),
         audience: AUDIENCE.into(),
@@ -315,14 +441,26 @@ fn signed_token(kid: &str) -> String {
         client_id: Some("cli_snapshot_gate".into()),
         credential_id: None,
     };
-    let key = SigningKey::from_slice(&[7_u8; 32]).expect("fixed synthetic signing fixture");
     let mut token = Token::compact((), claims);
     *token.header_mut().key_id() = Some(kid.into());
     token
-        .sign::<_, Signature>(&key)
+        .sign::<_, Signature>(key)
         .expect("sign unknown-kid fixture")
         .rendered()
         .expect("render unknown-kid fixture")
+}
+
+fn assert_snapshot_accepts(snapshot: &ValidatorSnapshot, token: &str) {
+    snapshot
+        .verify(token, DatabaseProfile::Ordinary.database_role(), NOW + 1)
+        .expect("snapshot must accept the expected key");
+}
+
+fn assert_snapshot_rejects_unknown_key(snapshot: &ValidatorSnapshot, token: &str) {
+    assert_eq!(
+        snapshot.verify(token, DatabaseProfile::Ordinary.database_role(), NOW + 1),
+        Err(JwtValidationError::UnknownKeyId)
+    );
 }
 
 fn write_read_only(path: &Path, value: &[u8]) {

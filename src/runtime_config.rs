@@ -25,6 +25,7 @@ pub enum RuntimeConfigError {
     JwksTooLarge,
     UnsafeFileType,
     UnsafePermissions,
+    UnsafePublicationLayout,
     InvalidConfig,
     InvalidResources,
     InvalidJwks,
@@ -40,6 +41,9 @@ impl fmt::Display for RuntimeConfigError {
             Self::JwksTooLarge => "public JWKS exceeds its size limit",
             Self::UnsafeFileType => "validator material is not a regular file",
             Self::UnsafePermissions => "validator material is writable",
+            Self::UnsafePublicationLayout => {
+                "validator materials do not share a safe atomic publication directory"
+            }
             Self::InvalidConfig => "validator config is invalid",
             Self::InvalidResources => "validator issuer or audience is invalid",
             Self::InvalidJwks => "public JWKS is invalid",
@@ -77,32 +81,40 @@ fn load_validator_snapshot_from_paths(
     config_path: &Path,
     jwks_path: &Path,
 ) -> Result<ValidatorSnapshot, RuntimeConfigError> {
-    let config_bytes = read_immutable_file(
+    let config_material = read_immutable_file(
         config_path,
         MAX_VALIDATOR_CONFIG_BYTES,
         RuntimeConfigError::ConfigMissing,
         RuntimeConfigError::ConfigTooLarge,
         RuntimeConfigError::InvalidConfig,
     )?;
+    let config_bytes = config_material.bytes.as_slice();
     if config_bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
         return Err(RuntimeConfigError::InvalidConfig);
     }
     let config: ValidatorConfigDocument =
-        serde_json::from_slice(&config_bytes).map_err(|_| RuntimeConfigError::InvalidConfig)?;
+        serde_json::from_slice(config_bytes).map_err(|_| RuntimeConfigError::InvalidConfig)?;
     if config.schema != VALIDATOR_CONFIG_SCHEMA || config.jwks_path != PUBLIC_JWKS_PATH {
         return Err(RuntimeConfigError::InvalidConfig);
     }
     let policy = DatabaseTokenPolicy::new(config.issuer, config.audience)
         .map_err(|_| RuntimeConfigError::InvalidResources)?;
 
-    let jwks_bytes = read_immutable_file(
+    let jwks_material = read_immutable_file(
         jwks_path,
         MAX_PUBLIC_JWKS_BYTES,
         RuntimeConfigError::JwksMissing,
         RuntimeConfigError::JwksTooLarge,
         RuntimeConfigError::InvalidJwks,
     )?;
-    let jwks = std::str::from_utf8(&jwks_bytes).map_err(|_| RuntimeConfigError::InvalidJwks)?;
+    validate_atomic_publication_layout(
+        config_path,
+        config_material.device,
+        jwks_path,
+        jwks_material.device,
+    )?;
+    let jwks_bytes = jwks_material.bytes.as_slice();
+    let jwks = std::str::from_utf8(jwks_bytes).map_err(|_| RuntimeConfigError::InvalidJwks)?;
     let verifier = DatabaseTokenVerifier::from_jwks(jwks, policy).map_err(|error| match error {
         JwtValidationError::DuplicateKeyId => RuntimeConfigError::DuplicateKeyId,
         _ => RuntimeConfigError::InvalidJwks,
@@ -120,13 +132,43 @@ struct ValidatorConfigDocument {
     jwks_path: String,
 }
 
+struct ImmutableMaterial {
+    bytes: Vec<u8>,
+    device: u64,
+}
+
+fn validate_atomic_publication_layout(
+    config_path: &Path,
+    config_device: u64,
+    jwks_path: &Path,
+    jwks_device: u64,
+) -> Result<(), RuntimeConfigError> {
+    let Some(publication_directory) = config_path.parent() else {
+        return Err(RuntimeConfigError::UnsafePublicationLayout);
+    };
+    if jwks_path.parent() != Some(publication_directory) {
+        return Err(RuntimeConfigError::UnsafePublicationLayout);
+    }
+
+    let directory_metadata = fs::symlink_metadata(publication_directory)
+        .map_err(|_| RuntimeConfigError::UnsafePublicationLayout)?;
+    if !directory_metadata.file_type().is_dir()
+        || directory_metadata.dev() != config_device
+        || directory_metadata.dev() != jwks_device
+    {
+        return Err(RuntimeConfigError::UnsafePublicationLayout);
+    }
+
+    Ok(())
+}
+
 fn read_immutable_file(
     path: &Path,
     maximum_bytes: usize,
     missing: RuntimeConfigError,
     too_large: RuntimeConfigError,
     invalid: RuntimeConfigError,
-) -> Result<Vec<u8>, RuntimeConfigError> {
+) -> Result<ImmutableMaterial, RuntimeConfigError> {
     let path_metadata = fs::symlink_metadata(path).map_err(|error| match error.kind() {
         std::io::ErrorKind::NotFound => missing,
         std::io::ErrorKind::PermissionDenied => RuntimeConfigError::UnsafePermissions,
@@ -163,7 +205,10 @@ fn read_immutable_file(
     if bytes.len() > maximum_bytes {
         return Err(too_large);
     }
-    Ok(bytes)
+    Ok(ImmutableMaterial {
+        bytes,
+        device: opened_metadata.dev(),
+    })
 }
 
 #[cfg(test)]
