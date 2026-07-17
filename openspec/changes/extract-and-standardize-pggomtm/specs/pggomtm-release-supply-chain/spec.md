@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: mtmpg必须是pggomtm唯一源码与构建权威
-`codeh007/mtmpg` SHALL 在仓库根目录维护唯一`pggomtm` crate、lockfile、toolchain、Docker build、tests和release workflow。gomtmui或其他消费者 MUST NOT保留vendored源码、submodule、subtree、第二Docker build或可运行fallback；Cargo `target/`、本地image、secret和运行数据 MUST NOT进入迁移或Git历史。
+`codeh007/mtmpg` SHALL 在仓库根目录维护唯一`pggomtm` crate、lockfile、toolchain、Docker build graph、tests和release workflow。根`Dockerfile` SHALL是唯一构建图权威，GitHub Actions SHALL是执行该构建图并形成任务、consumer与发布证据的唯一权威。gomtmui或其他消费者 MUST NOT保留vendored源码、submodule、subtree、第二Docker build或可运行fallback；Cargo `target/`、本地image、secret和运行数据 MUST NOT进入迁移或Git历史。
 
 #### Scenario: 从gomtmui迁移原型
 - **WHEN** 迁移现有`gomtmui/native/pggomtm`原型
@@ -12,11 +12,15 @@
 - **THEN** 它 SHALL 消费mtmpg发布的固定OCI digest和versioned contract，不得从本地Rust目录重新构建
 
 #### Scenario: 远端CI需要可审计source
-- **WHEN** 迁移基线已通过但本地`main`领先远端且没有功能分支
-- **THEN** 维护者 SHALL在运行远端CI或prerelease前把精确已审查commit非force push到远端功能ref，保持`origin/main`不变，并让后续证据关联该remote commit
+- **WHEN** 本地功能分支包含尚未被远端验证的实现、测试或workflow变更
+- **THEN** 维护者 SHALL在运行CI或prerelease前把精确已审查commit非force push到远端功能ref，并让后续Actions证据关联该remote commit
+
+#### Scenario: 本地构建成功
+- **WHEN** 开发者本地`docker build`、测试命令或image tag成功
+- **THEN** 结果 MAY用于定位问题，但 MUST NOT完成OpenSpec task、gomtmui consumer gate、release readiness或发布证据
 
 ### Requirement: 仓库必须具备明确安全与维护契约
-仓库 SHALL 提供准确README、MIT LICENSE、SECURITY、贡献与发布说明、支持矩阵、升级策略和非`CREATE EXTENSION`安装边界。GitHub设置 SHALL 在当前套餐允许范围内采用最小权限Actions、full-SHA action引用、read-only默认workflow token、批准的merge策略与合并后删分支；无法启用的branch protection/rulesets MUST如实记录而不得伪报。
+仓库 SHALL 提供准确README、MIT LICENSE、SECURITY、贡献与发布说明、支持矩阵、升级策略和非`CREATE EXTENSION`安装边界。GitHub设置 SHALL 在当前visibility与套餐允许范围内采用最小权限Actions、full-SHA action引用、read-only默认workflow token、批准的merge策略与合并后删分支；无法启用的branch protection/rulesets MUST如实记录而不得伪报。仓库公开后 SHALL重新核对并启用实际可用的服务端安全与分支保护能力。
 
 #### Scenario: 新维护者检查仓库
 - **WHEN** 维护者只读取tracked文档与GitHub设置
@@ -26,12 +30,39 @@
 - **WHEN** 普通CI或release workflow运行
 - **THEN** 普通CI SHALL只获得read权限，release job SHALL只显式获得写Release、GHCR和attestation所需的最小权限
 
+### Requirement: 仓库公开必须先通过public-readiness门禁
+源码仓库在从private切换为public前 SHALL完成不回显敏感值的public-readiness审计，覆盖全部Git refs与历史、当前tracked与uncommitted文件、Docker build context、workflow源码和日志、Actions artifact、最终image、Release/package以及GitHub Issue/PR内容。真实secret MUST先吊销或轮换，再按明确批准处置历史；合成测试fixture只允许按精确路径、精确模式与理由分类，MUST NOT使用全局ignore。Visibility SHALL只由所有者在门禁通过后手动切换；源码公开 MUST NOT自动改变GHCR package visibility。
+
+#### Scenario: 公开前扫描只有合成哨兵命中
+- **WHEN** scanner只命中被测试用于证明secret门禁有效的确定性哨兵或公开fixture
+- **THEN** 维护者 SHALL记录精确路径、模式和理由后继续门禁，且不得放宽其他文件、历史或secret类别
+
+#### Scenario: 公开前发现真实secret
+- **WHEN** 任一ref、历史、工作树、日志、artifact、image或协作内容包含真实credential或私密材料
+- **THEN** 仓库 MUST保持private，相关credential SHALL先被吊销或轮换，并在明确批准的历史与远端处置完成后重新运行完整门禁
+
+#### Scenario: 所有者完成公开切换
+- **WHEN** public-readiness已经通过且所有者手动把源码仓库设为public
+- **THEN** 维护者 SHALL立即复核secret scanning、dependency graph/alerts、branch protection/ruleset及首个stable source进入`main`的策略，并 SHALL独立决定GHCR package visibility
+
 ### Requirement: CI必须从固定输入重复验证native安全边界
-每个pull request与main push SHALL 对locked依赖运行Rustfmt、Clippy `-D warnings`、unit/integration tests、依赖与许可证审计、官方header binding/layout与最终字节同一性、真实PG18 loader/OAuth正负矩阵、动态依赖、secret和artifact隔离扫描。CI MUST从远端可达的精确source commit运行并使用固定Rust、pgrx、JOSE、PostgreSQL source/runtime digest和full-SHA actions；native认证依赖与PG minor更新 MUST只通过人工审查PR进入。
+每个批准的功能分支push、pull request与main push SHALL 对locked依赖运行Rustfmt、Clippy `-D warnings`、unit/integration tests、依赖与许可证审计、官方header binding/layout与最终字节同一性、真实PG18 loader/OAuth正负矩阵、动态依赖、secret和artifact隔离扫描。CI MUST从远端可达的精确source commit运行并使用固定Rust、pgrx、JOSE、PostgreSQL source/runtime digest和full-SHA actions；native认证依赖与PG minor更新 MUST只通过人工审查PR进入。首次workflow SHALL通过功能分支push或PR事件bootstrap，不得为获得人工dispatch而切换默认分支或复制第二workflow实现。
 
 #### Scenario: 合法变更通过CI
 - **WHEN** clean checkout在批准输入上完成全部静态与真实PostgreSQL门禁
 - **THEN** CI SHALL 产生可关联远端source commit的成功证据，并且不得依赖开发者本地Cargo cache、仅本地分支或未跟踪文件
+
+#### Scenario: 日常CI使用缓存
+- **WHEN** 功能分支push或PR触发常规验证
+- **THEN** workflow SHALL使用内容寻址的BuildKit/GitHub Actions cache和同ref并发取消运行唯一Docker build graph，且不得登录GHCR、读取发布secret或上传正式制品
+
+#### Scenario: 冷门禁复验固定commit
+- **WHEN** 人工dispatch、定时门禁或发布前门禁验证一个批准的远端commit
+- **THEN** workflow SHALL从clean checkout对固定输入执行无缓存完整build graph并保存commit、run与验证摘要，且不得用常规缓存run冒充该cold authority证据
+
+#### Scenario: Public fork提交PR
+- **WHEN** 非受信fork代码触发公开仓库PR验证
+- **THEN** workflow SHALL只使用GitHub-hosted临时runner和read-only token，不得使用`pull_request_target`、发布secret、GHCR写权限、Release写权限或attestation写权限
 
 #### Scenario: ABI或供应链门禁失败
 - **WHEN** header/layout、OAuth矩阵、lock审计、动态依赖、secret扫描或artifact隔离任一失败
@@ -106,3 +137,7 @@ Release SHALL 发布基于精确官方`postgres:<minor>-bookworm@sha256:<digest>
 #### Scenario: 私有环境拉取GHCR image
 - **WHEN** 部署主机需要读取private package
 - **THEN** 它 SHALL 使用运行时注入的read-only package credential，且credential不得写入Compose、image、manifest或Release
+
+#### Scenario: 源码仓库已经公开但package仍为private
+- **WHEN** 所有者只改变mtmpg源码仓库visibility而没有独立批准GHCR package公开
+- **THEN** package SHALL继续使用private pull边界，且workflow与文档不得把源码公开误报为package公开

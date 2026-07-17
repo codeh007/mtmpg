@@ -39,20 +39,23 @@
 
 ## 6. JWT、role与identity接入正式callback
 
+执行顺序调整：当前6.3候选先形成独立可审查commit，但不得用本地Docker结果勾选；随后立即完成7.1远端CI bootstrap，并由精确远端HEAD的Actions成功run完成6.3，再继续6.4至6.6。
+
 - [x] 6.1 把已验证的ES256/JWKS verifier接入无gate feature的正式validate callback，保持固定issuer/audience/database scope、30至300秒TTL和deny-unknown完整claims契约
 - [x] 6.2 覆盖OAuth client与API-key credential actor二选一、authority version、profile、role、ID字符/长度、time、algorithm、audience/scope和tampered signature正负矩阵
-- [ ] 6.3 实现closed ordinary/business-admin/database-developer profile-role映射与startup requested role精确匹配，拒绝service/migration/cluster/未知role及配置扩权
-- [ ] 6.4 把版本化`authn_id`接入PostgreSQL allocator，覆盖`authn_id -> system_user -> decoded identity`无歧义往返和超长/非法/未知版本拒绝
-- [ ] 6.5 为认证失败建立稳定脱敏reason类别，验证日志、panic与错误不包含JWT、JWKS内容、connection string或完整内部堆栈
-- [ ] 6.6 构建无`abi-gate`、`abi-runtime-gate`、`pgx-oauth-gate`的production artifact，扫描排除内置测试JWKS/key/token、probe symbol/string和测试module
+- [ ] 6.3 为已存在的closed ordinary/business-admin/database-developer profile-role映射与startup requested role精确匹配补齐显式unit、config扩权和真实PostgreSQL forbidden-role门禁，拒绝service/migration/cluster/未知role；只有对应远端Actions run通过后才完成，本任务没有发现实现缺口时不得改production Rust逻辑
+- [ ] 6.4 以无gate production callback和真实libpq OAuth backend证明PostgreSQL allocator与`authn_id -> system_user -> decoded identity`无歧义往返，覆盖OAuth client/API-key actor、三个profile及超长/非法/未知版本拒绝；仅在门禁发现真实缺口时修改实现
+- [ ] 6.5 明确认证失败reason-code的稳定字符串、服务端日志级别与客户端可见性，验证token拒绝、startup错误、panic和PostgreSQL ERROR只产生脱敏类别且不包含JWT、JWKS内容、connection string或完整内部堆栈
+- [ ] 6.6 由远端Actions构建无`abi-gate`、`abi-runtime-gate`、`pgx-oauth-gate`的production artifact，扫描排除内置测试JWKS/key/token、probe symbol/string和测试module，并把本任务限定为module级artifact gate而不重复后续CI/发布供应链门禁
 
-## 7. 可重复CI与供应链门禁
+## 7. 远端GitHub Actions、可重复CI与公开准备
 
-- [ ] 7.1 在远端功能ref上增加PR/main CI，使用full-SHA actions和read-only权限从精确remote commit运行Rustfmt、Clippy `-D warnings`、locked unit/integration tests及所有ABI/JWT/runtime/final-byte provenance gates
+- [ ] 7.1 立即在远端功能ref建立feature push/PR CI bootstrap：只用full-SHA批准actions、read-only token、无secret/无GHCR登录、同ref并发取消和BuildKit GitHub Actions cache运行唯一Docker build graph；先分别提交当前6.3候选与workflow/流程文档，再非force push并用`gh run view/watch/rerun`取得精确remote HEAD证据，本地完整Docker结果不得完成任务
 - [ ] 7.2 增加Cargo依赖、RustSec与许可证审计，对完整pgrx transitive advisory逐项记录理由和复核期限，不使用全局ignore或自动放宽
-- [ ] 7.3 用Docker Buildx和registry cache建立clean-checkout PG18.4 build，验证固定source/header checksum、base digest、真实loader/OAuth和最终runtime filesystem
-- [ ] 7.4 增加Git history、workflow log、build context/cache、image、bundle、SBOM与manifest的secret/运行数据泄漏扫描，任一命中阻止发布
+- [ ] 7.3 为同一workflow增加`workflow_dispatch`/定时/发布前cold authority模式，从clean checkout无缓存验证固定source/header checksum、base digest、真实loader/OAuth和最终runtime filesystem；常规push/PR继续使用缓存，不能用缓存run冒充cold证据
+- [ ] 7.4 增加不回显敏感值的public-readiness与发布扫描，覆盖全部Git refs/history、tracked/uncommitted文件、workflow源码/log、Docker context/cache、Actions artifact、image、bundle、SBOM/manifest以及GitHub Issue/PR内容；真实命中先轮换并经批准处置，合成fixture只允许精确路径/模式/理由分类且禁止全局ignore
 - [ ] 7.5 增加动态链接、ELF export、arch/libc、module位置、官方entrypoint与image内容门禁，证明final image只增加正式`.so`、license和公开manifest
+- [ ] 7.6 public-readiness通过后等待所有者手动公开源码仓库，随即复核并启用实际可用的secret scanning、dependency graph/alerts与branch protection/ruleset，单独决定GHCR package visibility，并在改变visibility前解决首次stable exact source与受保护`main`的ancestry策略
 
 ## 8. GHCR、Release与consumer contract
 
@@ -60,7 +63,7 @@
 - [ ] 8.2 发布versioned正负向database-token、role和authn-id测试向量，让gomtmui issuer集成测试能固定消费且不包含任何真实key/token
 - [ ] 8.3 建立最小权限release workflow：alpha/RC使用其prerelease version且不可晋级；最终版本commit只构建一次short-SHA stable candidate并输出不可变OCI digest，只有E2E通过后的stable release为同一digest增加version/`latest`发现别名
 - [ ] 8.4 生成按PG/runtime target命名的tar.zst、`SHA256SUMS`、MIT license、SBOM和binary/container provenance/attestation，验证所有digest与manifest一致
-- [ ] 8.5 建立immutable GitHub Release并拒绝覆盖既有tag/asset；Actions临时artifact只用于job传递且不得成为正式安装URL
+- [ ] 8.5 建立拒绝覆盖既有tag/asset的immutable GitHub Release机制；若执行alpha/RC只能创建对应prerelease，首个stable Release仍只能由10.4在跨仓库E2E后创建，Actions临时artifact只用于job传递且不得成为正式安装URL
 - [ ] 8.6 文档化private GHCR的read-only pull credential边界，确保credential只由部署secret authority注入且不进入Compose、image、manifest或Release
 - [ ] 8.7 在native、CI与release workflow就绪后复核远端功能ref仍精确指向拟发布source commit，确认远程CI证据与本地source identity一致且未提前合并到`main`
 
@@ -75,7 +78,7 @@
 
 ## 10. 最终验证、推送与交付证据
 
-- [ ] 10.1 从clean checkout运行全部Rust、C probe、Docker、真实PG18 OAuth、依赖/许可证、secret、SBOM/provenance和artifact隔离门禁
+- [ ] 10.1 对最终远端source commit触发GitHub Actions cold authority，从clean checkout运行全部Rust、C probe、Docker、真实PG18 OAuth、依赖/许可证、secret、SBOM/provenance和artifact隔离门禁；本地复跑不得替代该run
 - [ ] 10.2 运行`git diff --check`与`openspec validate extract-and-standardize-pggomtm --strict`，确认tracked tree不含`target/`、secret、data、临时artifact或重复实现
 - [ ] 10.3 完成whole-branch review并审查Git diff、release manifest与GitHub设置，把远端功能ref中已完成跨仓库验收的精确commit以fast-forward原样推进并按Issue #116明确授权推送到`origin/main`，确认remote main、consumer证据与已验证source为同一commit且不得force push
 - [ ] 10.4 从该main commit为已经验证的同一OCI digest创建首个stable immutable Release与`latest`别名，确认没有重新构建、覆盖既有release或改变attestation identity
