@@ -261,6 +261,8 @@ fn non_v1_or_unknown_config_fields_are_rejected() {
         ("scope", json!("database")),
         ("max_ttl", json!(300)),
         ("role_mapping", json!({ "ordinary": "postgres" })),
+        ("allowed_roles", json!(["gomtm_test_auth_runtime"])),
+        ("service_role", json!("gomtm_test_auth_runtime")),
         ("fallback_issuer", json!("https://fallback.example.test")),
         ("private_key_path", json!("/run/secrets/signing-key.pem")),
     ] {

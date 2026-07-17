@@ -10,7 +10,7 @@
 - 仓库尚未创建 stable tag、GitHub Release 或可供部署固定的 GHCR 开放容器计划（Open Container Initiative，OCI）摘要。
 - 正常构建在外部材料和claims全部合规时授权并返回PostgreSQL allocator分配的版本化`authn_id`，tampered或不合规token保持未授权。
 - 当前无gate startup已经从外部只读 config 和 JSON Web Key Set（JWKS）建立每backend verifier snapshot，验证同文件系统原子轮换与既有snapshot隔离，并由正式validate callback消费该snapshot。
-- Database token矩阵已经覆盖OAuth client与API-key credential actor、三种profile、authority version、ID/time边界、algorithm、audience/scope与tampered signature；closed role、identity allocator和失败reason仍需完成独立门禁。
+- Database token矩阵已经覆盖OAuth client与API-key credential actor、三种profile、authority version、ID/time边界、algorithm、audience/scope与tampered signature；closed role实现已经存在，补充配置扩权与service/migration/cluster/unknown role拒绝门禁的6.3候选尚待精确远端commit的GitHub Actions验证。Identity allocator和失败reason仍需完成独立门禁。
 - Production build已经验证normal dependency tree、production源码、ELF动态依赖/未解析符号与敏感字符串不包含HTTP/DNS、libcurl/libpq、SQL/SPI、私钥加载、service credential、在线introspection或issuer fallback能力。
 - Runtime只接受PostgreSQL 18 major；当前build/test identity仍精确固定18.4，尚未独立构建或验证18.5，因此不得把现有artifact部署到18.5。
 - PG18.4的loader、allocator、callback和真实libpq `OAUTHBEARER`正负向smoke已通过；复验范围与限制见[PG18.4 runtime/OAuth证据](evidence/issue-116/pg18.4-runtime-oauth-smoke.md)。

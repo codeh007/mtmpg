@@ -583,3 +583,35 @@ fn profile_role_mapping_is_closed_and_non_inheriting() {
         assert_eq!(profile.database_role(), role);
     }
 }
+
+#[test]
+fn signed_or_requested_service_migration_cluster_and_unknown_roles_fail_closed() {
+    let key = signing_key();
+    let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
+    let base = valid_oauth_claims();
+    let ordinary_token = sign_payload(base.clone(), KID, &key);
+
+    for forbidden_role in [
+        DatabaseProfile::BusinessAdmin.database_role(),
+        DatabaseProfile::DatabaseDeveloper.database_role(),
+        "gomtm_test_auth_runtime",
+        "gomtm_test_migration_owner",
+        "gomtm_platform_admin",
+        "gomtm_candidate_unknown",
+    ] {
+        assert_eq!(
+            verifier.verify(&ordinary_token, forbidden_role, NOW),
+            Err(JwtValidationError::RequestedRoleMismatch),
+            "requested role {forbidden_role} must not override the signed profile"
+        );
+
+        let mut claims = base.clone();
+        claims.db_role = forbidden_role.into();
+        let token = sign_payload(claims, KID, &key);
+        assert_eq!(
+            verifier.verify(&token, forbidden_role, NOW),
+            Err(JwtValidationError::InvalidClaims),
+            "signed role {forbidden_role} must not expand the closed profile mapping"
+        );
+    }
+}
