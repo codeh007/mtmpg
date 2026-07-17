@@ -5,6 +5,7 @@ use std::process::Command;
 
 const ALLOWED_DYNAMIC_DEPENDENCIES: &[&str] =
     &["ld-linux-x86-64.so.2", "libc.so.6", "libgcc_s.so.1"];
+const ALLOWED_DEFINED_SYMBOLS: &[&str] = &["Pg_magic_func", "_PG_oauth_validator_module_init"];
 const FORBIDDEN_NORMAL_DEPENDENCIES: &[&str] = &[
     "attohttpc",
     "awc",
@@ -106,6 +107,25 @@ const FORBIDDEN_ARTIFACT_STRINGS: &[&str] = &[
     "service_account",
     "service_credential",
 ];
+const FORBIDDEN_GATE_ARTIFACT_STRINGS: &[&str] = &[
+    "abi-gate",
+    "abi-runtime-gate",
+    "pgx-oauth-gate",
+    "pggomtm-abi-allocator",
+    "pggomtm-abi-error",
+    "pggomtm-abi-panic",
+    "pggomtm_abi_runtime_probe",
+    "pggomtm_config_gate",
+    "pggomtm_pgx_gate",
+    "candidate-es256-pgx-gate",
+    "HhhTL9R1TALzBB2cdc6zO4P_2BrHzk_ogsyxyYvFiW4",
+    "pGwxHE4v9A3ZajZT5uRURdMt_khuztdcepDGoYiBwKM",
+    "usr_pgx_gate",
+    "cli_pgx_gate",
+    "dlg_pgx_gate",
+];
+const PRODUCTION_FEATURE_IDENTITY: &str = r#""features":["pg18"]"#;
+const RAW_TEST_SIGNING_KEY: [u8; 32] = [7; 32];
 
 fn dependency_violations(tree: &str) -> Vec<String> {
     let mut violations = BTreeSet::new();
@@ -180,6 +200,48 @@ fn undefined_symbol_violations(nm: &str) -> Vec<String> {
     violations.into_iter().collect()
 }
 
+fn defined_symbol_violations(nm: &str) -> Vec<String> {
+    let defined = nm
+        .lines()
+        .filter_map(|line| line.split_whitespace().last())
+        .collect::<BTreeSet<_>>();
+    let allowed = ALLOWED_DEFINED_SYMBOLS
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let mut violations = BTreeSet::new();
+
+    for symbol in defined.difference(&allowed) {
+        violations.insert(format!("unexpected exported symbol {symbol}"));
+    }
+    for symbol in allowed.difference(&defined) {
+        violations.insert(format!("missing required exported symbol {symbol}"));
+    }
+    violations.into_iter().collect()
+}
+
+fn elf_header_violations(header: &str) -> Vec<String> {
+    [
+        ("Class:                             ELF64", "ELF64 class"),
+        (
+            "Data:                              2's complement, little endian",
+            "little-endian data",
+        ),
+        (
+            "Type:                              DYN (Shared object file)",
+            "shared-object type",
+        ),
+        (
+            "Machine:                           Advanced Micro Devices X86-64",
+            "amd64 machine",
+        ),
+    ]
+    .into_iter()
+    .filter(|(fragment, _)| !header.contains(fragment))
+    .map(|(_, description)| format!("missing required ELF {description}"))
+    .collect()
+}
+
 fn artifact_string_violations(strings: &str) -> Vec<String> {
     let normalized = strings.to_ascii_lowercase();
     FORBIDDEN_ARTIFACT_STRINGS
@@ -187,6 +249,55 @@ fn artifact_string_violations(strings: &str) -> Vec<String> {
         .filter(|fragment| normalized.contains(**fragment))
         .map(|fragment| format!("forbidden artifact string {fragment}"))
         .collect()
+}
+
+fn production_artifact_violations(bytes: &[u8], strings: &str) -> Vec<String> {
+    let mut violations = BTreeSet::new();
+    for fragment in FORBIDDEN_GATE_ARTIFACT_STRINGS {
+        if strings.contains(fragment) {
+            violations.insert(format!("forbidden gate artifact string {fragment}"));
+        }
+    }
+    if !strings.contains(PRODUCTION_FEATURE_IDENTITY) {
+        violations.insert("missing exact production feature identity".to_owned());
+    }
+    if bytes
+        .windows(RAW_TEST_SIGNING_KEY.len())
+        .any(|window| window == RAW_TEST_SIGNING_KEY)
+    {
+        violations.insert("embedded raw test signing key".to_owned());
+    }
+    if contains_compact_jwt(bytes) {
+        violations.insert("embedded compact JWT".to_owned());
+    }
+    violations.into_iter().collect()
+}
+
+fn contains_compact_jwt(bytes: &[u8]) -> bool {
+    for start in 0..bytes.len().saturating_sub(3) {
+        if bytes.get(start..start + 3) != Some(b"eyJ") {
+            continue;
+        }
+
+        let mut segment_lengths = [0_usize; 3];
+        let mut segment = 0_usize;
+        for byte in &bytes[start..] {
+            if *byte == b'.' {
+                if segment >= 2 {
+                    break;
+                }
+                segment += 1;
+            } else if byte.is_ascii_alphanumeric() || matches!(*byte, b'_' | b'-') {
+                segment_lengths[segment] += 1;
+            } else {
+                break;
+            }
+        }
+        if segment == 2 && segment_lengths.into_iter().all(|length| length >= 8) {
+            return true;
+        }
+    }
+    false
 }
 
 #[test]
@@ -269,6 +380,39 @@ fn policy_rejects_forbidden_elf_capability_fixtures() {
 }
 
 #[test]
+fn policy_rejects_gate_symbols_keys_and_tokens() {
+    let defined = defined_symbol_violations(
+        "00000000 T Pg_magic_func\n00000010 T _PG_oauth_validator_module_init\n00000020 T pggomtm_test_probe\n",
+    );
+    assert!(
+        defined
+            .iter()
+            .any(|value| value.contains("pggomtm_test_probe"))
+    );
+
+    let mut fixture = RAW_TEST_SIGNING_KEY.to_vec();
+    fixture.extend_from_slice(b"eyJhbGciOiJFUzI1NiJ9.cGF5bG9hZDEyMzQ1.sigvalue1234");
+    let violations =
+        production_artifact_violations(&fixture, "candidate-es256-pgx-gate\nabi-runtime-gate\n");
+    assert!(
+        violations
+            .iter()
+            .any(|value| value.contains("test signing key"))
+    );
+    assert!(violations.iter().any(|value| value.contains("compact JWT")));
+    assert!(
+        violations
+            .iter()
+            .any(|value| value.contains("candidate-es256-pgx-gate"))
+    );
+    assert!(
+        violations
+            .iter()
+            .any(|value| value.contains("abi-runtime-gate"))
+    );
+}
+
+#[test]
 fn policy_accepts_the_minimal_offline_fixture() {
     assert!(dependency_violations("pggomtm v0.1.0\npgrx v0.19.1\np256 v0.13.2\n").is_empty());
     assert!(
@@ -286,6 +430,25 @@ fn policy_accepts_the_minimal_offline_fixture() {
     );
     assert!(undefined_symbol_violations(" U open64@GLIBC_2.2.5\n U read@GLIBC_2.2.5\n").is_empty());
     assert!(artifact_string_violations("issuer\naudience\n/etc/pggomtm/jwks.json\n").is_empty());
+    assert!(
+        defined_symbol_violations(
+            "00000000 T Pg_magic_func\n00000010 T _PG_oauth_validator_module_init\n"
+        )
+        .is_empty()
+    );
+    assert!(
+        elf_header_violations(
+            "Class:                             ELF64\nData:                              2's complement, little endian\nType:                              DYN (Shared object file)\nMachine:                           Advanced Micro Devices X86-64\n"
+        )
+        .is_empty()
+    );
+    assert!(
+        production_artifact_violations(
+            b"production-module-without-fixtures",
+            PRODUCTION_FEATURE_IDENTITY,
+        )
+        .is_empty()
+    );
 }
 
 #[test]
@@ -311,11 +474,18 @@ fn production_elf_capability_boundary_is_closed() {
     );
 
     let readelf = run_tool("readelf", &["--dynamic", "--wide"], &artifact);
-    let nm = run_tool("nm", &["--dynamic", "--undefined-only"], &artifact);
+    let header = run_tool("readelf", &["--file-header", "--wide"], &artifact);
+    let undefined = run_tool("nm", &["--dynamic", "--undefined-only"], &artifact);
+    let defined = run_tool("nm", &["--dynamic", "--defined-only"], &artifact);
     let strings = run_tool("strings", &["--all"], &artifact);
+    let bytes = fs::read(&artifact)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", artifact.display()));
     let mut violations = dynamic_dependency_violations(&readelf);
-    violations.extend(undefined_symbol_violations(&nm));
+    violations.extend(elf_header_violations(&header));
+    violations.extend(undefined_symbol_violations(&undefined));
+    violations.extend(defined_symbol_violations(&defined));
     violations.extend(artifact_string_violations(&strings));
+    violations.extend(production_artifact_violations(&bytes, &strings));
     assert_no_violations("production ELF capability boundary", &violations);
 }
 

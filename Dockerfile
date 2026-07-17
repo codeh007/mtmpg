@@ -454,14 +454,6 @@ RUN test -r /usr/lib/postgresql/18/lib/pggomtm.so \
     && test ! -e /usr/lib/postgresql/18/lib/pggomtm_abi_gate.so \
     && test ! -e /usr/lib/postgresql/18/lib/pggomtm_abi_runtime_probe.so \
     && test ! -e /usr/lib/postgresql/18/lib/pggomtm_config_gate.so \
-    && ! grep --binary-files=text --quiet 'pggomtm-abi-allocator' \
-      /usr/lib/postgresql/18/lib/pggomtm.so \
-    && ! grep --binary-files=text --quiet 'candidate-es256-pgx-gate' \
-      /usr/lib/postgresql/18/lib/pggomtm.so \
-    && ! grep --binary-files=text --quiet 'usr_pgx_gate' \
-      /usr/lib/postgresql/18/lib/pggomtm.so \
-    && ! ldd /usr/lib/postgresql/18/lib/pggomtm.so \
-      | grep --quiet libcurl \
     && rm \
       /tmp/pggomtm-abi-runtime-gate-passed \
       /tmp/pggomtm-oauth-smoke-passed \
