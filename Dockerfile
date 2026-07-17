@@ -57,6 +57,11 @@ RUN cc -std=c11 -Wall -Wextra -Werror \
     && echo "be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bcf  /opt/postgresql-18.4/include/server/libpq/oauth.h" \
       | sha256sum --check --strict
 
+RUN cargo test --locked --no-default-features --features pg18,abi-gate \
+      --test oauth_build_provenance \
+      -- \
+      --ignored \
+      --exact real_generator_rejects_unapproved_provenance_inputs
 RUN cargo test --locked --no-default-features --features pg18,abi-gate
 RUN cargo test --locked --no-default-features --features pg18,abi-gate,pgx-oauth-gate \
       --test pgx_oauth_gate

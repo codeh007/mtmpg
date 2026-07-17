@@ -31,20 +31,54 @@ const CALLBACK_TYPES: [&str; 4] = [
     "ValidatorValidateCB",
     "OAuthValidatorModuleInit",
 ];
+const AMBIENT_CLANG_ENV: [&str; 11] = [
+    "CCC_OVERRIDE_OPTIONS",
+    "CLANG_PATH",
+    "COMPILER_PATH",
+    "CPATH",
+    "CPLUS_INCLUDE_PATH",
+    "C_INCLUDE_PATH",
+    "LIBCLANG_PATH",
+    "LIBCLANG_STATIC_PATH",
+    "LLVM_CONFIG_PATH",
+    "OBJCPLUS_INCLUDE_PATH",
+    "OBJC_INCLUDE_PATH",
+];
 
 type BuildResult<T> = Result<T, Box<dyn Error>>;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=PGRX_PG_CONFIG_PATH");
+    println!("cargo:rerun-if-env-changed=TARGET");
 
-    if let Err(error) = generate_bindings() {
+    if let Err(error) = controlled_generate_bindings() {
         panic!("failed to generate the approved PostgreSQL OAuth ABI bindings: {error}");
     }
 }
 
+fn controlled_generate_bindings() -> BuildResult<()> {
+    let target = build_target()?;
+    let bindgen_env = bindgen_extra_clang_args_names(&target);
+    for variable in bindgen_env
+        .iter()
+        .map(String::as_str)
+        .chain(AMBIENT_CLANG_ENV)
+    {
+        println!("cargo:rerun-if-env-changed={variable}");
+    }
+    reject_ambient_clang_configuration(&bindgen_env)?;
+    generate_bindings()
+}
+
 fn generate_bindings() -> BuildResult<()> {
     let pg_config = target_pg_config()?;
-    println!("cargo:rerun-if-changed={}", pg_config.display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        approved_utf8_path(
+            &pg_config,
+            "canonical pg_config path must be valid UTF-8 and safe for Cargo metadata",
+        )?
+    );
 
     let version = pg_config_line(&pg_config, "--version")?;
     if version != APPROVED_POSTGRESQL_VERSION {
@@ -55,25 +89,34 @@ fn generate_bindings() -> BuildResult<()> {
     let postgres_header = approved_regular_file(&include_dir, "postgres.h")?;
     let oauth_header = approved_regular_file(&include_dir, "libpq/oauth.h")?;
 
-    println!("cargo:rerun-if-changed={}", include_dir.display());
-    println!("cargo:rerun-if-changed={}", postgres_header.display());
-    println!("cargo:rerun-if-changed={}", oauth_header.display());
+    let include_dir = approved_utf8_path(
+        &include_dir,
+        "canonical server include path must be safe for Clang and valid UTF-8",
+    )?;
+    let postgres_header = approved_utf8_path(
+        &postgres_header,
+        "canonical PostgreSQL header path must be safe for Clang and valid UTF-8",
+    )?;
+    let oauth_header = approved_utf8_path(
+        &oauth_header,
+        "canonical OAuth header path must be safe for Clang and valid UTF-8",
+    )?;
 
-    let header = fs::read(&oauth_header)
+    println!("cargo:rerun-if-changed={include_dir}");
+    println!("cargo:rerun-if-changed={postgres_header}");
+    println!("cargo:rerun-if-changed={oauth_header}");
+
+    let header = fs::read(oauth_header)
         .map_err(|_| build_error("approved OAuth header could not be read"))?;
     let header_sha256 = format!("{:x}", Sha256::digest(&header));
     if header_sha256 != APPROVED_OAUTH_HEADER_SHA256 {
         return fail("OAuth header SHA-256 is not approved for this build variant");
     }
 
-    let include_dir = include_dir
-        .to_str()
-        .ok_or_else(|| build_error("server include path must be valid UTF-8"))?;
     let bindings = bindgen::Builder::default()
-        .header_contents(
-            "pggomtm_oauth_wrapper.h",
-            "#include \"postgres.h\"\n#include \"libpq/oauth.h\"\n",
-        )
+        .header(postgres_header)
+        .header(oauth_header)
+        .detect_include_paths(false)
         .clang_arg(format!("-I{include_dir}"))
         .allowlist_var("^PG_OAUTH_VALIDATOR_MAGIC$")
         .allowlist_type(
@@ -111,8 +154,15 @@ fn target_pg_config() -> BuildResult<PathBuf> {
         return fail("PGRX_PG_CONFIG_PATH must name one absolute pg_config executable");
     }
 
-    let canonical = fs::canonicalize(configured)
+    let canonical = fs::canonicalize(&configured)
         .map_err(|_| build_error("PGRX_PG_CONFIG_PATH could not be resolved"))?;
+    approved_utf8_path(
+        &canonical,
+        "canonical pg_config path must be valid UTF-8 and safe for Cargo metadata",
+    )?;
+    if canonical != configured {
+        return fail("PGRX_PG_CONFIG_PATH must already be canonical");
+    }
     if !fs::metadata(&canonical)
         .map_err(|_| build_error("PGRX_PG_CONFIG_PATH metadata could not be read"))?
         .is_file()
@@ -130,8 +180,15 @@ fn server_include_dir(pg_config: &Path) -> BuildResult<PathBuf> {
         return fail("pg_config --includedir-server did not return an absolute path");
     }
 
-    let canonical = fs::canonicalize(reported)
+    let canonical = fs::canonicalize(&reported)
         .map_err(|_| build_error("server include directory could not be resolved"))?;
+    approved_utf8_path(
+        &canonical,
+        "canonical server include path must be safe for Clang and valid UTF-8",
+    )?;
+    if canonical != reported {
+        return fail("server include directory must already be canonical");
+    }
     if !fs::metadata(&canonical)
         .map_err(|_| build_error("server include directory metadata could not be read"))?
         .is_dir()
@@ -189,6 +246,51 @@ fn output_dir() -> BuildResult<PathBuf> {
         return fail("Cargo OUT_DIR must be an existing absolute directory");
     }
     Ok(out_dir)
+}
+
+fn build_target() -> BuildResult<String> {
+    let target = env::var("TARGET")
+        .map_err(|_| build_error("Cargo TARGET must be present and valid UTF-8"))?;
+    if target.is_empty()
+        || !target
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        return fail("Cargo TARGET must be one non-empty target identifier");
+    }
+    Ok(target)
+}
+
+fn bindgen_extra_clang_args_names(target: &str) -> [String; 3] {
+    [
+        "BINDGEN_EXTRA_CLANG_ARGS".to_owned(),
+        format!("BINDGEN_EXTRA_CLANG_ARGS_{target}"),
+        format!("BINDGEN_EXTRA_CLANG_ARGS_{}", target.replace('-', "_")),
+    ]
+}
+
+fn reject_ambient_clang_configuration(bindgen_env: &[String; 3]) -> BuildResult<()> {
+    for variable in bindgen_env
+        .iter()
+        .map(String::as_str)
+        .chain(AMBIENT_CLANG_ENV)
+    {
+        if env::var_os(variable).is_some() {
+            return fail("ambient bindgen or Clang configuration is not permitted");
+        }
+    }
+    Ok(())
+}
+
+fn approved_utf8_path<'a>(path: &'a Path, error: &str) -> BuildResult<&'a str> {
+    let path = path.to_str().ok_or_else(|| build_error(error))?;
+    if path
+        .chars()
+        .any(|character| character.is_control() || matches!(character, '"' | '\\'))
+    {
+        return fail(error);
+    }
+    Ok(path)
 }
 
 fn validate_generated_bindings(generated: &str) -> BuildResult<()> {
