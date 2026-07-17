@@ -19,7 +19,7 @@
 - [x] 3.1 先增加tracked RED门禁，真实证明恶意`RUSTFMT`与`PATH/rustfmt`可被检测，并要求ABI类型/magic来自目标官方`oauth.h`且被校验字节与最终`OUT_DIR`编译字节完全一致
 - [x] 3.2 实现最小build-time allowlist bindings，禁用外部formatter并单次materialize生成结果，固定官方header与最终bindings digest，拒绝ambient formatter、缺失symbol、未知layout或非批准server headers
 - [x] 3.3 对同一份materialized字节完成allowlist验证后直接原样写入`OUT_DIR`，保留官方C size/offset/layout probe并交叉验证state/result/callback、magic、init signature及最终文件digest，禁止校验后的二次序列化
-- [ ] 3.4 删除源码中的手写OAuth ABI struct/magic权威与冗余direct `pgrx-pg-sys`依赖，只通过完整pgrx的`pg_sys`、module magic、guard、error和allocator接口实现FFI
+- [x] 3.4 删除源码中的手写OAuth ABI struct/magic权威与冗余direct `pgrx-pg-sys`依赖，只通过完整pgrx的`pg_sys`、module magic、guard、error和allocator接口实现FFI
 - [ ] 3.5 覆盖startup/validate/shutdown的null、panic、PostgreSQL ERROR、allocator、错误magic与缺失callback负向矩阵，证明任一异常在真实backend中fail closed
 
 ## 4. PG18 stable-line兼容与artifact身份
