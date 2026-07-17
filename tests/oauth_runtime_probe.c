@@ -16,6 +16,15 @@ PG_FUNCTION_INFO_V1(pggomtm_config_validate_probe);
 
 #define ABI_RUNTIME_PANIC_SENTINEL ((void *) (uintptr_t) 1)
 #define ABI_RUNTIME_ERROR_SENTINEL ((void *) (uintptr_t) 2)
+#define REASON_CALLBACK_INPUT "pggomtm-auth/v1/callback-input-invalid"
+#define REASON_CONFIG_MISSING "pggomtm-auth/v1/config-missing"
+#define REASON_INTERNAL_PANIC "pggomtm-auth/v1/internal-panic"
+#define REASON_POSTGRES_ERROR "pggomtm-auth/v1/postgres-error"
+#define REASON_POSTGRES_MAJOR "pggomtm-auth/v1/postgres-major-unsupported"
+
+static bool error_data_matches_reason(const ErrorData *error_data,
+									  const char *expected_reason);
+static bool error_text_is_redacted(const char *value);
 
 static bool
 callback_table_is_loadable(const OAuthValidatorCallbacks *callbacks)
@@ -27,13 +36,15 @@ callback_table_is_loadable(const OAuthValidatorCallbacks *callbacks)
 
 static void
 expect_startup_error(const OAuthValidatorCallbacks *callbacks,
-				 void *sentinel, const char *scenario)
+				 void *sentinel, const char *scenario,
+				 const char *expected_reason)
 {
 	ValidatorModuleState state = {
 		.sversion = PG_VERSION_NUM,
 		.private_data = sentinel,
 	};
 	volatile bool rejected = false;
+	volatile bool reason_matched = false;
 
 	PG_TRY();
 	{
@@ -41,12 +52,16 @@ expect_startup_error(const OAuthValidatorCallbacks *callbacks,
 	}
 	PG_CATCH();
 	{
+		ErrorData *error_data = CopyErrorData();
+
+		reason_matched = error_data_matches_reason(error_data, expected_reason);
+		FreeErrorData(error_data);
 		FlushErrorState();
 		rejected = true;
 	}
 	PG_END_TRY();
 
-	if (!rejected || state.private_data != NULL)
+	if (!rejected || !reason_matched || state.private_data != NULL)
 		ereport(ERROR,
 				(errmsg("pggomtm ABI gate did not fail closed for %s",
 						scenario)));
@@ -54,13 +69,15 @@ expect_startup_error(const OAuthValidatorCallbacks *callbacks,
 
 static void
 expect_shutdown_error(const OAuthValidatorCallbacks *callbacks,
-				  void *sentinel, const char *scenario)
+				  void *sentinel, const char *scenario,
+				  const char *expected_reason)
 {
 	ValidatorModuleState state = {
 		.sversion = PG_VERSION_NUM,
 		.private_data = sentinel,
 	};
 	volatile bool rejected = false;
+	volatile bool reason_matched = false;
 
 	PG_TRY();
 	{
@@ -68,12 +85,16 @@ expect_shutdown_error(const OAuthValidatorCallbacks *callbacks,
 	}
 	PG_CATCH();
 	{
+		ErrorData *error_data = CopyErrorData();
+
+		reason_matched = error_data_matches_reason(error_data, expected_reason);
+		FreeErrorData(error_data);
 		FlushErrorState();
 		rejected = true;
 	}
 	PG_END_TRY();
 
-	if (!rejected || state.private_data != NULL)
+	if (!rejected || !reason_matched || state.private_data != NULL)
 		ereport(ERROR,
 				(errmsg("pggomtm ABI gate did not fail closed for %s",
 						scenario)));
@@ -88,6 +109,7 @@ expect_validate_error(const OAuthValidatorCallbacks *callbacks,
 		.authn_id = (char *) 1,
 	};
 	volatile bool rejected = false;
+	volatile bool reason_matched = false;
 
 	PG_TRY();
 	{
@@ -98,12 +120,17 @@ expect_validate_error(const OAuthValidatorCallbacks *callbacks,
 	}
 	PG_CATCH();
 	{
+		ErrorData *error_data = CopyErrorData();
+
+		reason_matched = error_data_matches_reason(error_data,
+												 REASON_POSTGRES_ERROR);
+		FreeErrorData(error_data);
 		FlushErrorState();
 		rejected = true;
 	}
 	PG_END_TRY();
 
-	if (!rejected || result.authorized || result.authn_id != NULL)
+	if (!rejected || !reason_matched || result.authorized || result.authn_id != NULL)
 		ereport(ERROR,
 				(errmsg("pggomtm ABI gate allowed PostgreSQL ERROR across validate")));
 }
@@ -124,7 +151,9 @@ pggomtm_abi_runtime_probe(PG_FUNCTION_ARGS)
 		.private_data = NULL,
 	};
 	volatile bool wrong_major_rejected = false;
+	volatile bool wrong_major_reason_matched = false;
 	volatile bool null_startup_rejected = false;
+	volatile bool null_startup_reason_matched = false;
 	OAuthValidatorCallbacks invalid_callbacks;
 
 	validator_init = (OAuthValidatorModuleInit)
@@ -167,18 +196,23 @@ pggomtm_abi_runtime_probe(PG_FUNCTION_ARGS)
 	}
 	PG_CATCH();
 	{
+		ErrorData *error_data = CopyErrorData();
+
+		null_startup_reason_matched =
+			error_data_matches_reason(error_data, REASON_CALLBACK_INPUT);
+		FreeErrorData(error_data);
 		FlushErrorState();
 		null_startup_rejected = true;
 	}
 	PG_END_TRY();
-	if (!null_startup_rejected)
+	if (!null_startup_rejected || !null_startup_reason_matched)
 		ereport(ERROR,
 				(errmsg("pggomtm ABI gate accepted a null startup state")));
 
 	expect_startup_error(callbacks, ABI_RUNTIME_PANIC_SENTINEL,
-					 "startup panic");
+					 "startup panic", REASON_INTERNAL_PANIC);
 	expect_startup_error(callbacks, ABI_RUNTIME_ERROR_SENTINEL,
-					 "startup PostgreSQL ERROR");
+					 "startup PostgreSQL ERROR", REASON_POSTGRES_ERROR);
 
 	callbacks->startup_cb(&state);
 	if (state.private_data == NULL)
@@ -255,12 +289,18 @@ pggomtm_abi_runtime_probe(PG_FUNCTION_ARGS)
 	}
 	PG_CATCH();
 	{
+		ErrorData *error_data = CopyErrorData();
+
+		wrong_major_reason_matched =
+			error_data_matches_reason(error_data, REASON_POSTGRES_MAJOR);
+		FreeErrorData(error_data);
 		FlushErrorState();
 		wrong_major_rejected = true;
 	}
 	PG_END_TRY();
 
-	if (!wrong_major_rejected || wrong_major_state.private_data != NULL)
+	if (!wrong_major_rejected || !wrong_major_reason_matched ||
+		wrong_major_state.private_data != NULL)
 		ereport(ERROR,
 				(errmsg("pggomtm ABI gate accepted an unsupported PostgreSQL major")));
 
@@ -271,9 +311,9 @@ pggomtm_abi_runtime_probe(PG_FUNCTION_ARGS)
 
 	callbacks->shutdown_cb(NULL);
 	expect_shutdown_error(callbacks, ABI_RUNTIME_PANIC_SENTINEL,
-					  "shutdown panic");
+					  "shutdown panic", REASON_INTERNAL_PANIC);
 	expect_shutdown_error(callbacks, ABI_RUNTIME_ERROR_SENTINEL,
-					  "shutdown PostgreSQL ERROR");
+					  "shutdown PostgreSQL ERROR", REASON_POSTGRES_ERROR);
 
 	pfree(library_name);
 	PG_RETURN_BOOL(true);
@@ -290,6 +330,7 @@ pggomtm_config_missing_probe(PG_FUNCTION_ARGS)
 		.private_data = NULL,
 	};
 	volatile bool rejected = false;
+	volatile bool reason_matched = false;
 
 	validator_init = (OAuthValidatorModuleInit)
 		load_external_function(library_name,
@@ -308,17 +349,64 @@ pggomtm_config_missing_probe(PG_FUNCTION_ARGS)
 	}
 	PG_CATCH();
 	{
+		ErrorData *error_data = CopyErrorData();
+
+		reason_matched =
+			error_data_matches_reason(error_data, REASON_CONFIG_MISSING);
+		FreeErrorData(error_data);
 		FlushErrorState();
 		rejected = true;
 	}
 	PG_END_TRY();
 
-	if (!rejected || state.private_data != NULL)
+	if (!rejected || !reason_matched || state.private_data != NULL)
 		ereport(ERROR,
 				(errmsg("pggomtm config gate accepted missing runtime material")));
 
 	pfree(library_name);
 	PG_RETURN_BOOL(true);
+}
+
+static bool
+error_data_matches_reason(const ErrorData *error_data,
+							  const char *expected_reason)
+{
+	return error_data != NULL && error_data->elevel == ERROR &&
+		error_data->message != NULL &&
+		strstr(error_data->message, expected_reason) != NULL &&
+		error_text_is_redacted(error_data->message) &&
+		error_text_is_redacted(error_data->detail) &&
+		error_text_is_redacted(error_data->detail_log) &&
+		error_text_is_redacted(error_data->hint) &&
+		error_text_is_redacted(error_data->context);
+}
+
+static bool
+error_text_is_redacted(const char *value)
+{
+	static const char *const forbidden[] = {
+		"eyJ",
+		"candidate-es256",
+		"postgresql://",
+		"Authorization: Bearer",
+		"BEGIN PRIVATE KEY",
+		"stack backtrace",
+		"panicked at",
+		"src/lib.rs",
+		NULL
+	};
+	const char *const *entry;
+
+	if (value == NULL)
+		return true;
+	if (strlen(value) > 1024)
+		return false;
+	for (entry = forbidden; *entry != NULL; entry++)
+	{
+		if (strstr(value, *entry) != NULL)
+			return false;
+	}
+	return true;
 }
 
 Datum

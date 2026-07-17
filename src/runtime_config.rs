@@ -6,6 +6,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::auth_failure::AuthenticationFailureReason;
 use crate::database_auth::{
     DatabaseTokenPolicy, DatabaseTokenVerifier, JwtValidationError, MAX_JWKS_BYTES,
     VerifiedDatabaseToken,
@@ -53,6 +54,30 @@ impl fmt::Display for RuntimeConfigError {
 }
 
 impl std::error::Error for RuntimeConfigError {}
+
+impl RuntimeConfigError {
+    #[must_use]
+    pub const fn reason(self) -> AuthenticationFailureReason {
+        match self {
+            Self::ConfigMissing => AuthenticationFailureReason::ConfigMissing,
+            Self::JwksMissing => AuthenticationFailureReason::JwksMissing,
+            Self::ConfigTooLarge => AuthenticationFailureReason::ConfigTooLarge,
+            Self::JwksTooLarge => AuthenticationFailureReason::JwksTooLarge,
+            Self::UnsafeFileType => AuthenticationFailureReason::UnsafeFileType,
+            Self::UnsafePermissions => AuthenticationFailureReason::UnsafePermissions,
+            Self::UnsafePublicationLayout => AuthenticationFailureReason::UnsafePublicationLayout,
+            Self::InvalidConfig => AuthenticationFailureReason::InvalidConfig,
+            Self::InvalidResources => AuthenticationFailureReason::InvalidResources,
+            Self::InvalidJwks => AuthenticationFailureReason::InvalidJwks,
+            Self::DuplicateKeyId => AuthenticationFailureReason::DuplicateKeyId,
+        }
+    }
+
+    #[must_use]
+    pub const fn reason_code(self) -> &'static str {
+        self.reason().code()
+    }
+}
 
 #[derive(Debug)]
 pub struct ValidatorSnapshot {

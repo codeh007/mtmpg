@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use url::Url;
 
+use crate::auth_failure::AuthenticationFailureReason;
+
 pub const MIN_TOKEN_TTL_SECONDS: i64 = 30;
 pub const MAX_TOKEN_TTL_SECONDS: i64 = 300;
 pub const MAX_AUTHN_ID_BYTES: usize = 512;
@@ -56,6 +58,29 @@ impl fmt::Display for JwtValidationError {
 }
 
 impl std::error::Error for JwtValidationError {}
+
+impl JwtValidationError {
+    #[must_use]
+    pub const fn reason(self) -> AuthenticationFailureReason {
+        match self {
+            Self::InvalidPolicy => AuthenticationFailureReason::InvalidTokenPolicy,
+            Self::InvalidJwks => AuthenticationFailureReason::InvalidJwks,
+            Self::DuplicateKeyId => AuthenticationFailureReason::DuplicateKeyId,
+            Self::InvalidToken => AuthenticationFailureReason::InvalidToken,
+            Self::InvalidHeader => AuthenticationFailureReason::InvalidTokenHeader,
+            Self::UnknownKeyId => AuthenticationFailureReason::UnknownKeyId,
+            Self::InvalidSignature => AuthenticationFailureReason::InvalidSignature,
+            Self::InvalidClaims => AuthenticationFailureReason::InvalidClaims,
+            Self::RequestedRoleMismatch => AuthenticationFailureReason::RequestedRoleMismatch,
+            Self::InvalidIdentity => AuthenticationFailureReason::InvalidIdentity,
+        }
+    }
+
+    #[must_use]
+    pub const fn reason_code(self) -> &'static str {
+        self.reason().code()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DatabaseTokenPolicy {

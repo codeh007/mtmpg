@@ -239,7 +239,8 @@ RUN mkdir --mode=0700 /tmp/pggomtm-abi-pgdata \
       --auth-host=reject \
     && gosu postgres pg_ctl \
       --pgdata=/tmp/pggomtm-abi-pgdata \
-      --options="-c listen_addresses='' -k /tmp" \
+      --log=/tmp/pggomtm-abi-server.log \
+      --options="-c listen_addresses='' -k /tmp -c log_min_messages=log" \
       --wait start \
     && gosu postgres psql \
       --host=/tmp \
@@ -274,6 +275,12 @@ RUN mkdir --mode=0700 /tmp/pggomtm-abi-pgdata \
       --username=postgres \
       --dbname=postgres \
       --file=/tmp/runtime_config_validate_probe.sql \
+    && grep --extended-regexp --quiet \
+      'LOG:.*pggomtm authentication rejected: reason=pggomtm-auth/v1/internal-panic' \
+      /tmp/pggomtm-abi-server.log \
+    && ! grep --extended-regexp --quiet \
+      'stack backtrace|panicked at|RUST_BACKTRACE|src/lib\.rs|eyJ[A-Za-z0-9_-]+\.' \
+      /tmp/pggomtm-abi-server.log \
     && gosu postgres pg_ctl \
       --pgdata=/tmp/pggomtm-abi-pgdata \
       --mode=fast \
@@ -284,6 +291,7 @@ RUN mkdir --mode=0700 /tmp/pggomtm-abi-pgdata \
       /tmp/runtime_config_missing_probe.sql \
       /tmp/runtime_config_ready_probe.sql \
       /tmp/runtime_config_validate_probe.sql \
+      /tmp/pggomtm-abi-server.log \
       /tmp/runtime-config-fixture \
       /tmp/pggomtm-config-fixtures \
       /tmp/pggomtm_oauth_smoke_fixture \
@@ -300,14 +308,7 @@ COPY --from=build /src/tests/fixtures/runtime-config /tmp/runtime-config-fixture
 COPY --from=pgx-oauth-gate-build /tmp/pggomtm_oauth_smoke_client /tmp/pggomtm_oauth_smoke_client
 COPY --from=pgx-oauth-gate-build /tmp/pggomtm_oauth_smoke_fixture /tmp/pggomtm_oauth_smoke_fixture
 
-RUN mkdir --mode=0555 /etc/pggomtm \
-    && install --mode=0444 \
-      /tmp/runtime-config-fixture/validator.json \
-      /etc/pggomtm/validator.json \
-    && install --mode=0444 \
-      /tmp/runtime-config-fixture/jwks.json \
-      /etc/pggomtm/jwks.json \
-    && mkdir --mode=0700 /tmp/pggomtm-production-identity-pgdata \
+RUN mkdir --mode=0700 /tmp/pggomtm-production-identity-pgdata \
     && chown postgres:postgres /tmp/pggomtm-production-identity-pgdata \
     && gosu postgres initdb \
       --pgdata=/tmp/pggomtm-production-identity-pgdata \
@@ -326,7 +327,8 @@ RUN mkdir --mode=0555 /etc/pggomtm \
       /tmp/pggomtm-production-identity-pgdata/pg_hba.conf \
     && gosu postgres pg_ctl \
       --pgdata=/tmp/pggomtm-production-identity-pgdata \
-      --options="-c listen_addresses='' -k /tmp -c oauth_validator_libraries=pggomtm_identity_gate" \
+      --log=/tmp/pggomtm-production-identity-server.log \
+      --options="-c listen_addresses='' -k /tmp -c log_min_messages=log -c oauth_validator_libraries=pggomtm_identity_gate" \
       --wait start \
     && gosu postgres psql \
       --host=/tmp \
@@ -337,6 +339,17 @@ RUN mkdir --mode=0555 /etc/pggomtm \
     && /tmp/pggomtm_oauth_smoke_fixture \
       generate \
       /tmp/pggomtm-production-identity-fixtures \
+    && /tmp/pggomtm_oauth_smoke_client \
+      --expect-rejected \
+      /tmp/pggomtm-production-identity-fixtures/oauth-ordinary.jwt \
+      gomtm_candidate_ordinary \
+    && mkdir --mode=0555 /etc/pggomtm \
+    && install --mode=0444 \
+      /tmp/runtime-config-fixture/validator.json \
+      /etc/pggomtm/validator.json \
+    && install --mode=0444 \
+      /tmp/runtime-config-fixture/jwks.json \
+      /etc/pggomtm/jwks.json \
     && /tmp/pggomtm_oauth_smoke_client \
       --expect-allowed \
       /tmp/pggomtm-production-identity-fixtures/oauth-ordinary.jwt \
@@ -387,14 +400,39 @@ RUN mkdir --mode=0555 /etc/pggomtm \
       --expect-rejected \
       /tmp/pggomtm-production-identity-fixtures/invalid-illegal-identity.jwt \
       gomtm_candidate_ordinary \
+    && /tmp/pggomtm_oauth_smoke_client \
+      --expect-rejected \
+      /tmp/pggomtm-production-identity-fixtures/tampered.jwt \
+      gomtm_candidate_ordinary \
     && /tmp/pggomtm_oauth_smoke_fixture verify-codec-rejections \
     && gosu postgres pg_ctl \
       --pgdata=/tmp/pggomtm-production-identity-pgdata \
       --mode=fast \
       --wait stop \
+    && grep --extended-regexp --quiet \
+      '(ERROR|FATAL):.*pggomtm authentication failed: reason=pggomtm-auth/v1/config-missing' \
+      /tmp/pggomtm-production-identity-server.log \
+    && grep --extended-regexp --quiet \
+      'LOG:.*pggomtm authentication rejected: reason=pggomtm-auth/v1/token-signature-invalid' \
+      /tmp/pggomtm-production-identity-server.log \
+    && test "$(grep --count --fixed-strings \
+      'pggomtm authentication rejected: reason=pggomtm-auth/v1/identity-invalid' \
+      /tmp/pggomtm-production-identity-server.log)" -ge 2 \
+    && for fixture in /tmp/pggomtm-production-identity-fixtures/*.jwt; do \
+      ! grep --fixed-strings --file="$fixture" \
+        /tmp/pggomtm-production-identity-server.log || exit 1; \
+    done \
+    && ! grep --fixed-strings --file=/etc/pggomtm/validator.json \
+      /tmp/pggomtm-production-identity-server.log \
+    && ! grep --fixed-strings --file=/etc/pggomtm/jwks.json \
+      /tmp/pggomtm-production-identity-server.log \
+    && ! grep --extended-regexp --quiet \
+      'Authorization: Bearer|postgres(ql)?://|stack backtrace|panicked at|RUST_BACKTRACE|src/lib\.rs|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' \
+      /tmp/pggomtm-production-identity-server.log \
     && rm -rf \
       /tmp/pggomtm-production-identity-pgdata \
       /tmp/pggomtm-production-identity-fixtures \
+      /tmp/pggomtm-production-identity-server.log \
       /tmp/runtime-config-fixture \
       /tmp/pggomtm_oauth_smoke_client \
       /tmp/pggomtm_oauth_smoke_fixture \

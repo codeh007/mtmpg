@@ -18,6 +18,7 @@ static char *oauth_token;
 static int provide_oauth_token(PGauthData type, PGconn *conn, void *data);
 static char *read_token(const char *path);
 static void clear_token(char *token);
+static bool rejected_connection_is_redacted(const char *error);
 static int verify_authenticated_session(PGconn *conn, const char *expected_role,
 									const char *system_user_path);
 static int write_system_user_fixture(const char *path, const char *value);
@@ -68,15 +69,13 @@ main(int argc, char **argv)
 		const char *error = conn == NULL ? "libpq returned no connection" :
 			PQerrorMessage(conn);
 
-		if (!expect_allowed &&
-			strstr(error, "OAuth bearer authentication failed") != NULL &&
-			strstr(error, oauth_token) == NULL)
+		if (!expect_allowed && rejected_connection_is_redacted(error))
 		{
 			printf("PG18.4 OAuth rejection smoke passed\n");
 			status = EXIT_SUCCESS;
 		}
 		else
-			fprintf(stderr, "OAuth connection failed unexpectedly: %s", error);
+			fprintf(stderr, "OAuth connection failed unexpectedly (redacted)\n");
 		goto done;
 	}
 
@@ -174,6 +173,20 @@ clear_token(char *token)
 	for (cursor = token; *cursor != '\0'; cursor++)
 		*cursor = '\0';
 	free(token);
+}
+
+static bool
+rejected_connection_is_redacted(const char *error)
+{
+	return error != NULL &&
+		strstr(error, "OAuth bearer authentication failed") != NULL &&
+		strstr(error, oauth_token) == NULL &&
+		strstr(error, "pggomtm-auth/") == NULL &&
+		strstr(error, "reason=") == NULL &&
+		strstr(error, "JWKS") == NULL &&
+		strstr(error, "postgresql://") == NULL &&
+		strstr(error, "stack backtrace") == NULL &&
+		strstr(error, "panicked at") == NULL;
 }
 
 static int

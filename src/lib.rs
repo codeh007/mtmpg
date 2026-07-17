@@ -12,6 +12,7 @@ use std::ffi::{c_char, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 
+use auth_failure::AuthenticationFailureReason;
 #[cfg(not(any(
     feature = "abi-gate",
     feature = "abi-runtime-gate",
@@ -21,6 +22,7 @@ use runtime_config::{ValidatorSnapshot, load_validator_snapshot};
 
 pgrx::pg_module_magic!();
 
+pub mod auth_failure;
 pub mod database_auth;
 pub mod oauth_abi;
 pub mod runtime_config;
@@ -82,11 +84,7 @@ pub fn oauth_callbacks() -> &'static OAuthValidatorCallbacks {
 #[cfg_attr(not(feature = "abi-gate"), pgrx::pg_guard)]
 unsafe extern "C-unwind" fn validator_startup(state: *mut ValidatorModuleState) {
     if state.is_null() {
-        #[cfg(feature = "abi-gate")]
-        panic!("pggomtm received a null validator state");
-
-        #[cfg(not(feature = "abi-gate"))]
-        pgrx::error!("pggomtm received a null validator state");
+        raise_authentication_error(AuthenticationFailureReason::InvalidCallbackInput);
     }
 
     let state = unsafe { &mut *state };
@@ -99,24 +97,25 @@ unsafe extern "C-unwind" fn validator_startup(state: *mut ValidatorModuleState) 
         feature = "pgx-oauth-gate"
     )))]
     if !state.private_data.is_null() {
-        pgrx::error!("pggomtm validator state was already initialized");
+        raise_authentication_error(AuthenticationFailureReason::InvalidCallbackState);
     }
 
     state.private_data = ptr::null_mut();
 
     #[cfg(feature = "abi-runtime-gate")]
     match initial_private_data.addr() {
-        ABI_RUNTIME_PANIC_SENTINEL => panic!("pggomtm ABI runtime startup panic gate"),
-        ABI_RUNTIME_ERROR_SENTINEL => pgrx::error!("pggomtm ABI runtime startup error gate"),
+        ABI_RUNTIME_PANIC_SENTINEL => panic!(
+            "pggomtm authentication failed: reason={}",
+            AuthenticationFailureReason::InternalPanic.code()
+        ),
+        ABI_RUNTIME_ERROR_SENTINEL => {
+            raise_authentication_error(AuthenticationFailureReason::PostgresError)
+        }
         _ => {}
     }
 
     if !server_version_is_supported(state.sversion) {
-        #[cfg(feature = "abi-gate")]
-        panic!("pggomtm requires PostgreSQL 18");
-
-        #[cfg(not(feature = "abi-gate"))]
-        pgrx::error!("pggomtm requires PostgreSQL 18");
+        raise_authentication_error(AuthenticationFailureReason::UnsupportedPostgresMajor);
     }
 
     #[cfg(any(
@@ -135,7 +134,7 @@ unsafe extern "C-unwind" fn validator_startup(state: *mut ValidatorModuleState) 
     )))]
     {
         let snapshot = load_validator_snapshot()
-            .unwrap_or_else(|error| pgrx::error!("pggomtm validator startup failed: {error}"));
+            .unwrap_or_else(|error| raise_authentication_error(error.reason()));
         state.private_data = Box::into_raw(Box::new(snapshot)).cast::<c_void>();
     }
 }
@@ -156,9 +155,12 @@ unsafe extern "C-unwind" fn validator_shutdown(state: *mut ValidatorModuleState)
 
         #[cfg(feature = "abi-runtime-gate")]
         match initial_private_data.addr() {
-            ABI_RUNTIME_PANIC_SENTINEL => panic!("pggomtm ABI runtime shutdown panic gate"),
+            ABI_RUNTIME_PANIC_SENTINEL => panic!(
+                "pggomtm authentication failed: reason={}",
+                AuthenticationFailureReason::InternalPanic.code()
+            ),
             ABI_RUNTIME_ERROR_SENTINEL => {
-                pgrx::error!("pggomtm ABI runtime shutdown error gate")
+                raise_authentication_error(AuthenticationFailureReason::PostgresError)
             }
             _ => {}
         }
@@ -182,6 +184,7 @@ unsafe extern "C-unwind" fn validate_token(
     result: *mut ValidatorModuleResult,
 ) -> bool {
     if result.is_null() {
+        log_authentication_rejection(AuthenticationFailureReason::InvalidCallbackInput);
         return false;
     }
 
@@ -192,10 +195,16 @@ unsafe extern "C-unwind" fn validate_token(
 
     let validation = catch_unwind(AssertUnwindSafe(|| {
         let Some(state) = (unsafe { state.as_ref() }) else {
+            log_authentication_rejection(AuthenticationFailureReason::InvalidCallbackInput);
             return false;
         };
 
-        if token.is_null() || role.is_null() || !server_version_is_supported(state.sversion) {
+        if token.is_null() || role.is_null() {
+            log_authentication_rejection(AuthenticationFailureReason::InvalidCallbackInput);
+            return false;
+        }
+        if !server_version_is_supported(state.sversion) {
+            log_authentication_rejection(AuthenticationFailureReason::UnsupportedPostgresMajor);
             return false;
         }
 
@@ -205,6 +214,7 @@ unsafe extern "C-unwind" fn validate_token(
             feature = "pgx-oauth-gate"
         ))]
         if state.private_data != state as *const ValidatorModuleState as *mut c_void {
+            log_authentication_rejection(AuthenticationFailureReason::InvalidCallbackState);
             return false;
         }
 
@@ -214,6 +224,7 @@ unsafe extern "C-unwind" fn validate_token(
             feature = "pgx-oauth-gate"
         )))]
         if state.private_data.is_null() {
+            log_authentication_rejection(AuthenticationFailureReason::InvalidCallbackState);
             return false;
         }
 
@@ -222,11 +233,14 @@ unsafe extern "C-unwind" fn validate_token(
             let token = unsafe { CStr::from_ptr(token) };
 
             if token == c"pggomtm-abi-panic" {
-                panic!("pggomtm ABI runtime panic gate");
+                panic!(
+                    "pggomtm authentication failed: reason={}",
+                    AuthenticationFailureReason::InternalPanic.code()
+                );
             }
 
             if token == c"pggomtm-abi-error" {
-                pgrx::error!("pggomtm ABI runtime validate error gate");
+                raise_authentication_error(AuthenticationFailureReason::PostgresError);
             }
 
             if token == c"pggomtm-abi-allocator" {
@@ -248,16 +262,22 @@ unsafe extern "C-unwind" fn validate_token(
             let token = unsafe { CStr::from_ptr(token) };
             let role = unsafe { CStr::from_ptr(role) };
             let (Ok(token), Ok(role)) = (token.to_str(), role.to_str()) else {
+                log_authentication_rejection(AuthenticationFailureReason::InvalidCallbackInput);
                 return true;
             };
             let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else {
+                log_authentication_rejection(AuthenticationFailureReason::InvalidCallbackState);
                 return false;
             };
             let now = i64::try_from(now.as_secs()).unwrap_or(i64::MAX);
 
             #[cfg(feature = "pgx-oauth-gate")]
-            let Ok(authn_id) = verify_pgx_gate_token(token, role, now) else {
-                return true;
+            let authn_id = match verify_pgx_gate_token(token, role, now) {
+                Ok(authn_id) => authn_id,
+                Err(error) => {
+                    log_authentication_rejection(error.reason());
+                    return true;
+                }
             };
 
             #[cfg(not(any(
@@ -267,13 +287,18 @@ unsafe extern "C-unwind" fn validate_token(
             )))]
             let authn_id = {
                 let snapshot = unsafe { &*state.private_data.cast::<ValidatorSnapshot>() };
-                let Ok(verified) = snapshot.verify(token, role, now) else {
-                    return true;
+                let verified = match snapshot.verify(token, role, now) {
+                    Ok(verified) => verified,
+                    Err(error) => {
+                        log_authentication_rejection(error.reason());
+                        return true;
+                    }
                 };
                 verified.authn_id
             };
 
             let Ok(authn_id) = CString::new(authn_id) else {
+                log_authentication_rejection(AuthenticationFailureReason::InvalidIdentity);
                 return false;
             };
             let result = unsafe { &mut *result };
@@ -298,8 +323,29 @@ unsafe extern "C-unwind" fn validate_token(
         {
             std::panic::resume_unwind(error)
         }
-        Err(_) => false,
+        Err(_) => {
+            log_authentication_rejection(AuthenticationFailureReason::InternalPanic);
+            false
+        }
     }
+}
+
+#[cfg(feature = "abi-gate")]
+fn log_authentication_rejection(_reason: AuthenticationFailureReason) {}
+
+#[cfg(not(feature = "abi-gate"))]
+fn log_authentication_rejection(reason: AuthenticationFailureReason) {
+    pgrx::log!("pggomtm authentication rejected: reason={reason}");
+}
+
+#[cfg(not(feature = "abi-gate"))]
+fn raise_authentication_error(reason: AuthenticationFailureReason) -> ! {
+    pgrx::error!("pggomtm authentication failed: reason={reason}");
+}
+
+#[cfg(feature = "abi-gate")]
+fn raise_authentication_error(reason: AuthenticationFailureReason) -> ! {
+    panic!("pggomtm authentication failed: reason={reason}");
 }
 
 #[cfg_attr(not(feature = "abi-gate"), pgrx::pg_guard)]
