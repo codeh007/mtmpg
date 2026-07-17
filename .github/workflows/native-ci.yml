@@ -18,6 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  BUILDX_METADATA_PROVENANCE: "disabled"
   DOCKER_BUILD_RECORD_UPLOAD: "false"
   DOCKER_BUILD_SUMMARY: "false"
 
