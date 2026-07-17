@@ -92,6 +92,19 @@ RUN cargo test --locked --no-default-features --features pg18 \
     && nm -D target/release/libpggomtm.so \
       | grep --quiet ' _PG_oauth_validator_module_init$'
 
+RUN cargo tree --locked --no-default-features --features pg18 \
+      --edges normal \
+      --prefix none \
+      > /tmp/pggomtm-normal-dependencies.txt \
+    && PGGOMTM_NORMAL_DEPENDENCY_TREE=/tmp/pggomtm-normal-dependencies.txt \
+      PGGOMTM_PRODUCTION_SOURCE_ROOT=/src/src \
+      PGGOMTM_PRODUCTION_ARTIFACT=/src/target/release/libpggomtm.so \
+      cargo test --locked --no-default-features --features pg18,abi-gate \
+        --test production_capability_gate \
+        -- \
+        --ignored \
+    && rm /tmp/pggomtm-normal-dependencies.txt
+
 RUN cargo fmt --check \
     && cargo clippy \
       --locked \

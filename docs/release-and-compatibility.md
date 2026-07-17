@@ -10,6 +10,7 @@
 - 仓库尚未创建 stable tag、GitHub Release 或可供部署固定的 GHCR 开放容器计划（Open Container Initiative，OCI）摘要。
 - 正常构建仍保持 `authorized=false`，且不返回 `authn_id`。
 - 当前无gate startup已经从外部只读 config 和 JSON Web Key Set（JWKS）建立每backend verifier snapshot，并验证同文件系统原子轮换与既有snapshot隔离；正式validate callback尚未消费该snapshot。
+- Production build已经验证normal dependency tree、production源码、ELF动态依赖/未解析符号与敏感字符串不包含HTTP/DNS、libcurl/libpq、SQL/SPI、私钥加载、service credential、在线introspection或issuer fallback能力。
 - Runtime只接受PostgreSQL 18 major；当前build/test identity仍精确固定18.4，尚未独立构建或验证18.5，因此不得把现有artifact部署到18.5。
 - PG18.4的loader、allocator、callback和真实libpq `OAUTHBEARER`正负向smoke已通过；复验范围与限制见[PG18.4 runtime/OAuth证据](evidence/issue-116/pg18.4-runtime-oauth-smoke.md)。
 - 每个Cargo feature组合已生成并嵌入`pggomtm-build-identity/v1`规范JSON及其SHA-256；该build identity不包含source commit、`.so`或OCI digest，不能替代发布manifest。

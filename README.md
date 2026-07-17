@@ -12,6 +12,7 @@
 - 生产交付不得使用 `cargo pgrx install` 或 `cargo pgrx package`。
 - 当前无 gate 的最终制品要求每个新 OAuth backend 在 startup 从固定只读路径建立独立 config/public JWKS snapshot；材料缺失、损坏、可写或不满足同目录同文件系统的原子发布布局时 startup fail closed。
 - 正式 validate callback 尚未消费该 snapshot，会保持 `authorized=false` 且不返回 `authn_id`，因此拒绝所有 token。
+- Production build对normal dependency tree、production源码、ELF `DT_NEEDED`、未解析符号和敏感字符串执行离线能力门禁，拒绝HTTP/DNS、libcurl/libpq、SQL/SPI、私钥加载、service credential、在线introspection和issuer fallback入口。
 - `abi-gate`、`abi-runtime-gate` 与 `pgx-oauth-gate` 只用于测试。内置的确定性 key、公开 JSON Web Key Set（JWKS）和 token fixture 不得用于生产。
 
 当前状态不是 `production-ready`。仓库没有已发布的 `stable` 发布版、生产支持版本或可供部署固定的 GitHub Container Registry（GHCR）开放容器计划（OCI）摘要。
@@ -39,7 +40,7 @@ PG18.4的loader、allocator、callback及真实libpq `OAUTHBEARER`正负向smoke
 
 ## 从仓库根目录构建和测试
 
-`Dockerfile` 是当前 clean build 与原型门禁的权威入口。以下命令构建 Linux amd64 本地候选镜像，并重新运行 Rust、C、真实 PostgreSQL runtime 与最终制品隔离检查：
+`Dockerfile` 是当前 clean build 与原型门禁的权威入口。以下命令构建 Linux amd64 本地候选镜像，并重新运行 Rust、C、production静态/ELF离线能力、真实 PostgreSQL runtime 与最终制品隔离检查：
 
 ```bash
 DOCKER_BUILDKIT=1 docker build \

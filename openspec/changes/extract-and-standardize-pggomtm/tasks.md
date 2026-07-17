@@ -35,7 +35,7 @@
 - [x] 5.2 先增加config/JWKS snapshot负向测试，覆盖缺失、过大、权限不安全、未知字段、非法HTTPS资源、empty/duplicate/unknown kid、private JWK和非ES256 key
 - [x] 5.3 实现每个新OAuth backend在startup读取并验证不可变config/public-JWKS snapshot，缺失或损坏时fail closed且不保留旧缓存或内置key
 - [x] 5.4 实现同文件系统原子替换轮换语义，证明后续backend读取完整active+retiring key集合、既有backend不reload且不会观察半写文件
-- [ ] 5.5 增加静态与ELF依赖门禁，证明正式module不存在HTTP、DNS、libcurl、SQL、SPI、私钥、service credential、在线introspection或第二issuer/fallback
+- [x] 5.5 增加静态与ELF依赖门禁，证明正式module不存在HTTP、DNS、libcurl、SQL、SPI、私钥、service credential、在线introspection或第二issuer/fallback
 
 ## 6. JWT、role与identity接入正式callback
 
