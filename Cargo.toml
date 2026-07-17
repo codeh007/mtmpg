@@ -9,6 +9,11 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[[example]]
+name = "pggomtm_oauth_smoke_token"
+path = "examples/pggomtm_oauth_smoke_token.rs"
+required-features = ["pgx-oauth-gate"]
+
 [features]
 default = ["pg18"]
 pg18 = ["pgrx/pg18"]

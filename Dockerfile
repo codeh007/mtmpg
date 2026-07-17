@@ -47,6 +47,7 @@ RUN curl --fail --location --proto '=https' --tlsv1.2 \
 
 WORKDIR /src
 COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml Dockerfile ./
+COPY examples ./examples
 COPY src ./src
 COPY tests ./tests
 
@@ -131,15 +132,68 @@ RUN cargo test --locked --no-default-features --features pg18,pgx-oauth-gate \
       '"features":["pg18","pgx-oauth-gate"]' \
       /tmp/pggomtm_pgx_gate.so \
     && nm -D /tmp/pggomtm_pgx_gate.so \
-      | grep --quiet ' _PG_oauth_validator_module_init$'
+      | grep --quiet ' _PG_oauth_validator_module_init$' \
+    && cargo build --locked --release --example pggomtm_oauth_smoke_token \
+      --no-default-features --features pg18,pgx-oauth-gate \
+    && cp \
+      target/release/examples/pggomtm_oauth_smoke_token \
+      /tmp/pggomtm_oauth_smoke_token \
+    && cc -std=c11 -Wall -Wextra -Werror \
+      -I/opt/postgresql-18.4/include \
+      tests/oauth_smoke_client.c \
+      -L/opt/postgresql-18.4/lib \
+      -lpq \
+      -o /tmp/pggomtm_oauth_smoke_client
 
 FROM postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296 AS pgx-oauth-gate
 
 COPY --from=pgx-oauth-gate-build /tmp/pggomtm_pgx_gate.so /usr/lib/postgresql/18/lib/pggomtm_pgx_gate.so
+COPY --from=pgx-oauth-gate-build /tmp/pggomtm_oauth_smoke_client /tmp/pggomtm_oauth_smoke_client
+COPY --from=pgx-oauth-gate-build /tmp/pggomtm_oauth_smoke_token /tmp/pggomtm_oauth_smoke_token
 
 RUN test -r /usr/lib/postgresql/18/lib/pggomtm_pgx_gate.so \
     && ! ldd /usr/lib/postgresql/18/lib/pggomtm_pgx_gate.so \
-      | grep --quiet libcurl
+      | grep --quiet libcurl \
+    && mkdir --mode=0700 /tmp/pggomtm-oauth-pgdata \
+    && chown postgres:postgres /tmp/pggomtm-oauth-pgdata \
+    && gosu postgres initdb \
+      --pgdata=/tmp/pggomtm-oauth-pgdata \
+      --encoding=UTF8 \
+      --no-locale \
+      --auth-local=trust \
+      --auth-host=reject \
+    && sed -i \
+      '1ilocal all gomtm_candidate_ordinary oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm_pgx_gate delegate_ident_mapping=1' \
+      /tmp/pggomtm-oauth-pgdata/pg_hba.conf \
+    && gosu postgres pg_ctl \
+      --pgdata=/tmp/pggomtm-oauth-pgdata \
+      --options="-c listen_addresses='' -k /tmp -c oauth_validator_libraries=pggomtm_pgx_gate" \
+      --wait start \
+    && gosu postgres psql \
+      --host=/tmp \
+      --username=postgres \
+      --dbname=postgres \
+      --command='CREATE ROLE gomtm_candidate_ordinary LOGIN' \
+    && /tmp/pggomtm_oauth_smoke_token \
+      /tmp/pggomtm-oauth-valid.jwt \
+      /tmp/pggomtm-oauth-tampered.jwt \
+    && /tmp/pggomtm_oauth_smoke_client \
+      --expect-allowed \
+      /tmp/pggomtm-oauth-valid.jwt \
+    && /tmp/pggomtm_oauth_smoke_client \
+      --expect-rejected \
+      /tmp/pggomtm-oauth-tampered.jwt \
+    && gosu postgres pg_ctl \
+      --pgdata=/tmp/pggomtm-oauth-pgdata \
+      --mode=fast \
+      --wait stop \
+    && rm -rf \
+      /tmp/pggomtm-oauth-pgdata \
+      /tmp/pggomtm-oauth-valid.jwt \
+      /tmp/pggomtm-oauth-tampered.jwt \
+      /tmp/pggomtm_oauth_smoke_client \
+      /tmp/pggomtm_oauth_smoke_token \
+    && touch /tmp/pggomtm-oauth-smoke-passed
 
 FROM postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296 AS abi-runtime-gate
 
@@ -178,10 +232,12 @@ RUN mkdir --mode=0700 /tmp/pggomtm-abi-pgdata \
 FROM postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296
 
 COPY --from=abi-runtime-gate /tmp/pggomtm-abi-runtime-gate-passed /tmp/pggomtm-abi-runtime-gate-passed
+COPY --from=pgx-oauth-gate /tmp/pggomtm-oauth-smoke-passed /tmp/pggomtm-oauth-smoke-passed
 COPY --from=build /src/target/release/libpggomtm.so /usr/lib/postgresql/18/lib/pggomtm.so
 
 RUN test -r /usr/lib/postgresql/18/lib/pggomtm.so \
     && test -f /tmp/pggomtm-abi-runtime-gate-passed \
+    && test -f /tmp/pggomtm-oauth-smoke-passed \
     && test ! -e /usr/lib/postgresql/18/lib/pggomtm_abi_gate.so \
     && test ! -e /usr/lib/postgresql/18/lib/pggomtm_abi_runtime_probe.so \
     && ! grep --binary-files=text --quiet 'pggomtm-abi-allocator' \
@@ -192,4 +248,6 @@ RUN test -r /usr/lib/postgresql/18/lib/pggomtm.so \
       /usr/lib/postgresql/18/lib/pggomtm.so \
     && ! ldd /usr/lib/postgresql/18/lib/pggomtm.so \
       | grep --quiet libcurl \
-    && rm /tmp/pggomtm-abi-runtime-gate-passed
+    && rm \
+      /tmp/pggomtm-abi-runtime-gate-passed \
+      /tmp/pggomtm-oauth-smoke-passed
