@@ -69,11 +69,23 @@ fn callback_table_initializes_and_fails_closed_before_jwt_gate() {
 }
 
 #[test]
-fn exact_minor_gate_rejects_other_pg18_servers() {
-    assert!(server_version_is_supported(PG18_VERSION_NUM));
-    assert!(!server_version_is_supported(180_003));
-    assert!(!server_version_is_supported(180_005));
-    assert!(!server_version_is_supported(170_007));
+fn pg18_stable_line_versions_are_supported() {
+    for server_version in [180_003, 180_004, 180_005, 189_999] {
+        assert!(
+            server_version_is_supported(server_version),
+            "PG18 version {server_version} must pass the runtime major gate"
+        );
+    }
+}
+
+#[test]
+fn other_postgresql_majors_are_rejected() {
+    for server_version in [170_999, 190_000] {
+        assert!(
+            !server_version_is_supported(server_version),
+            "non-PG18 version {server_version} must fail the runtime major gate"
+        );
+    }
 }
 
 #[cfg(feature = "abi-gate")]
