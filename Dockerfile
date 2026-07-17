@@ -146,11 +146,11 @@ RUN cargo test --locked --no-default-features --features pg18,pgx-oauth-gate \
       /tmp/pggomtm_pgx_gate.so \
     && nm -D /tmp/pggomtm_pgx_gate.so \
       | grep --quiet ' _PG_oauth_validator_module_init$' \
-    && cargo build --locked --release --example pggomtm_oauth_smoke_token \
+    && cargo build --locked --release --example pggomtm_oauth_smoke_fixture \
       --no-default-features --features pg18,pgx-oauth-gate \
     && cp \
-      target/release/examples/pggomtm_oauth_smoke_token \
-      /tmp/pggomtm_oauth_smoke_token \
+      target/release/examples/pggomtm_oauth_smoke_fixture \
+      /tmp/pggomtm_oauth_smoke_fixture \
     && cc -std=c11 -Wall -Wextra -Werror \
       -I/opt/postgresql-18.4/include \
       tests/oauth_smoke_client.c \
@@ -162,7 +162,7 @@ FROM postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058
 
 COPY --from=pgx-oauth-gate-build /tmp/pggomtm_pgx_gate.so /usr/lib/postgresql/18/lib/pggomtm_pgx_gate.so
 COPY --from=pgx-oauth-gate-build /tmp/pggomtm_oauth_smoke_client /tmp/pggomtm_oauth_smoke_client
-COPY --from=pgx-oauth-gate-build /tmp/pggomtm_oauth_smoke_token /tmp/pggomtm_oauth_smoke_token
+COPY --from=pgx-oauth-gate-build /tmp/pggomtm_oauth_smoke_fixture /tmp/pggomtm_oauth_smoke_fixture
 
 RUN test -r /usr/lib/postgresql/18/lib/pggomtm_pgx_gate.so \
     && ! ldd /usr/lib/postgresql/18/lib/pggomtm_pgx_gate.so \
@@ -187,25 +187,34 @@ RUN test -r /usr/lib/postgresql/18/lib/pggomtm_pgx_gate.so \
       --username=postgres \
       --dbname=postgres \
       --command='CREATE ROLE gomtm_candidate_ordinary LOGIN' \
-    && /tmp/pggomtm_oauth_smoke_token \
-      /tmp/pggomtm-oauth-valid.jwt \
-      /tmp/pggomtm-oauth-tampered.jwt \
+    && mkdir --mode=0700 /tmp/pggomtm-oauth-fixtures \
+    && /tmp/pggomtm_oauth_smoke_fixture \
+      generate \
+      /tmp/pggomtm-oauth-fixtures \
     && /tmp/pggomtm_oauth_smoke_client \
       --expect-allowed \
-      /tmp/pggomtm-oauth-valid.jwt \
+      /tmp/pggomtm-oauth-fixtures/oauth-ordinary.jwt \
+      gomtm_candidate_ordinary \
+      /tmp/pggomtm-oauth-fixtures/oauth-ordinary.system-user \
+    && /tmp/pggomtm_oauth_smoke_fixture \
+      verify-system-user \
+      oauth-ordinary \
+      /tmp/pggomtm-oauth-fixtures/oauth-ordinary.system-user \
+    && /tmp/pggomtm_oauth_smoke_fixture \
+      verify-codec-rejections \
     && /tmp/pggomtm_oauth_smoke_client \
       --expect-rejected \
-      /tmp/pggomtm-oauth-tampered.jwt \
+      /tmp/pggomtm-oauth-fixtures/tampered.jwt \
+      gomtm_candidate_ordinary \
     && gosu postgres pg_ctl \
       --pgdata=/tmp/pggomtm-oauth-pgdata \
       --mode=fast \
       --wait stop \
     && rm -rf \
       /tmp/pggomtm-oauth-pgdata \
-      /tmp/pggomtm-oauth-valid.jwt \
-      /tmp/pggomtm-oauth-tampered.jwt \
+      /tmp/pggomtm-oauth-fixtures \
       /tmp/pggomtm_oauth_smoke_client \
-      /tmp/pggomtm_oauth_smoke_token \
+      /tmp/pggomtm_oauth_smoke_fixture \
     && touch /tmp/pggomtm-oauth-smoke-passed
 
 FROM postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296 AS abi-runtime-gate
@@ -218,7 +227,7 @@ COPY --from=build /src/tests/runtime_config_missing_probe.sql /tmp/runtime_confi
 COPY --from=build /src/tests/runtime_config_ready_probe.sql /tmp/runtime_config_ready_probe.sql
 COPY --from=build /src/tests/runtime_config_validate_probe.sql /tmp/runtime_config_validate_probe.sql
 COPY --from=build /src/tests/fixtures/runtime-config /tmp/runtime-config-fixture
-COPY --from=pgx-oauth-gate-build /tmp/pggomtm_oauth_smoke_token /tmp/pggomtm_oauth_smoke_token
+COPY --from=pgx-oauth-gate-build /tmp/pggomtm_oauth_smoke_fixture /tmp/pggomtm_oauth_smoke_fixture
 
 RUN mkdir --mode=0700 /tmp/pggomtm-abi-pgdata \
     && chown postgres:postgres /tmp/pggomtm-abi-pgdata \
@@ -249,12 +258,11 @@ RUN mkdir --mode=0700 /tmp/pggomtm-abi-pgdata \
     && install --mode=0444 \
       /tmp/runtime-config-fixture/jwks.json \
       /etc/pggomtm/jwks.json \
-    && /tmp/pggomtm_oauth_smoke_token \
-      /tmp/pggomtm-config-valid.jwt \
-      /tmp/pggomtm-config-tampered.jwt \
-    && chmod 0444 \
-      /tmp/pggomtm-config-valid.jwt \
-      /tmp/pggomtm-config-tampered.jwt \
+    && mkdir --mode=0700 /tmp/pggomtm-config-fixtures \
+    && /tmp/pggomtm_oauth_smoke_fixture \
+      generate \
+      /tmp/pggomtm-config-fixtures \
+    && chmod 0444 /tmp/pggomtm-config-fixtures/*.jwt \
     && gosu postgres psql \
       --host=/tmp \
       --username=postgres \
@@ -276,24 +284,134 @@ RUN mkdir --mode=0700 /tmp/pggomtm-abi-pgdata \
       /tmp/runtime_config_ready_probe.sql \
       /tmp/runtime_config_validate_probe.sql \
       /tmp/runtime-config-fixture \
-      /tmp/pggomtm-config-valid.jwt \
-      /tmp/pggomtm-config-tampered.jwt \
-      /tmp/pggomtm_oauth_smoke_token \
+      /tmp/pggomtm-config-fixtures \
+      /tmp/pggomtm_oauth_smoke_fixture \
       /etc/pggomtm \
       /usr/lib/postgresql/18/lib/pggomtm_abi_gate.so \
       /usr/lib/postgresql/18/lib/pggomtm_abi_runtime_probe.so \
       /usr/lib/postgresql/18/lib/pggomtm_config_gate.so \
     && touch /tmp/pggomtm-abi-runtime-gate-passed
 
+FROM postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296 AS production-identity-gate
+
+COPY --from=build /src/target/release/libpggomtm.so /usr/lib/postgresql/18/lib/pggomtm_identity_gate.so
+COPY --from=build /src/tests/fixtures/runtime-config /tmp/runtime-config-fixture
+COPY --from=pgx-oauth-gate-build /tmp/pggomtm_oauth_smoke_client /tmp/pggomtm_oauth_smoke_client
+COPY --from=pgx-oauth-gate-build /tmp/pggomtm_oauth_smoke_fixture /tmp/pggomtm_oauth_smoke_fixture
+
+RUN mkdir --mode=0555 /etc/pggomtm \
+    && install --mode=0444 \
+      /tmp/runtime-config-fixture/validator.json \
+      /etc/pggomtm/validator.json \
+    && install --mode=0444 \
+      /tmp/runtime-config-fixture/jwks.json \
+      /etc/pggomtm/jwks.json \
+    && mkdir --mode=0700 /tmp/pggomtm-production-identity-pgdata \
+    && chown postgres:postgres /tmp/pggomtm-production-identity-pgdata \
+    && gosu postgres initdb \
+      --pgdata=/tmp/pggomtm-production-identity-pgdata \
+      --encoding=UTF8 \
+      --no-locale \
+      --auth-local=trust \
+      --auth-host=reject \
+    && sed -i \
+      '1ilocal all gomtm_candidate_ordinary oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm_identity_gate delegate_ident_mapping=1' \
+      /tmp/pggomtm-production-identity-pgdata/pg_hba.conf \
+    && sed -i \
+      '1ilocal all gomtm_candidate_business_admin oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm_identity_gate delegate_ident_mapping=1' \
+      /tmp/pggomtm-production-identity-pgdata/pg_hba.conf \
+    && sed -i \
+      '1ilocal all gomtm_candidate_database_developer oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm_identity_gate delegate_ident_mapping=1' \
+      /tmp/pggomtm-production-identity-pgdata/pg_hba.conf \
+    && gosu postgres pg_ctl \
+      --pgdata=/tmp/pggomtm-production-identity-pgdata \
+      --options="-c listen_addresses='' -k /tmp -c oauth_validator_libraries=pggomtm_identity_gate" \
+      --wait start \
+    && gosu postgres psql \
+      --host=/tmp \
+      --username=postgres \
+      --dbname=postgres \
+      --command='CREATE ROLE gomtm_candidate_ordinary LOGIN; CREATE ROLE gomtm_candidate_business_admin LOGIN; CREATE ROLE gomtm_candidate_database_developer LOGIN' \
+    && mkdir --mode=0700 /tmp/pggomtm-production-identity-fixtures \
+    && /tmp/pggomtm_oauth_smoke_fixture \
+      generate \
+      /tmp/pggomtm-production-identity-fixtures \
+    && /tmp/pggomtm_oauth_smoke_client \
+      --expect-allowed \
+      /tmp/pggomtm-production-identity-fixtures/oauth-ordinary.jwt \
+      gomtm_candidate_ordinary \
+      /tmp/pggomtm-production-identity-fixtures/oauth-ordinary.system-user \
+    && /tmp/pggomtm_oauth_smoke_fixture verify-system-user oauth-ordinary \
+      /tmp/pggomtm-production-identity-fixtures/oauth-ordinary.system-user \
+    && /tmp/pggomtm_oauth_smoke_client \
+      --expect-allowed \
+      /tmp/pggomtm-production-identity-fixtures/oauth-business-admin.jwt \
+      gomtm_candidate_business_admin \
+      /tmp/pggomtm-production-identity-fixtures/oauth-business-admin.system-user \
+    && /tmp/pggomtm_oauth_smoke_fixture verify-system-user oauth-business-admin \
+      /tmp/pggomtm-production-identity-fixtures/oauth-business-admin.system-user \
+    && /tmp/pggomtm_oauth_smoke_client \
+      --expect-allowed \
+      /tmp/pggomtm-production-identity-fixtures/oauth-database-developer.jwt \
+      gomtm_candidate_database_developer \
+      /tmp/pggomtm-production-identity-fixtures/oauth-database-developer.system-user \
+    && /tmp/pggomtm_oauth_smoke_fixture verify-system-user oauth-database-developer \
+      /tmp/pggomtm-production-identity-fixtures/oauth-database-developer.system-user \
+    && /tmp/pggomtm_oauth_smoke_client \
+      --expect-allowed \
+      /tmp/pggomtm-production-identity-fixtures/api-key-ordinary.jwt \
+      gomtm_candidate_ordinary \
+      /tmp/pggomtm-production-identity-fixtures/api-key-ordinary.system-user \
+    && /tmp/pggomtm_oauth_smoke_fixture verify-system-user api-key-ordinary \
+      /tmp/pggomtm-production-identity-fixtures/api-key-ordinary.system-user \
+    && /tmp/pggomtm_oauth_smoke_client \
+      --expect-allowed \
+      /tmp/pggomtm-production-identity-fixtures/api-key-business-admin.jwt \
+      gomtm_candidate_business_admin \
+      /tmp/pggomtm-production-identity-fixtures/api-key-business-admin.system-user \
+    && /tmp/pggomtm_oauth_smoke_fixture verify-system-user api-key-business-admin \
+      /tmp/pggomtm-production-identity-fixtures/api-key-business-admin.system-user \
+    && /tmp/pggomtm_oauth_smoke_client \
+      --expect-allowed \
+      /tmp/pggomtm-production-identity-fixtures/api-key-database-developer.jwt \
+      gomtm_candidate_database_developer \
+      /tmp/pggomtm-production-identity-fixtures/api-key-database-developer.system-user \
+    && /tmp/pggomtm_oauth_smoke_fixture verify-system-user api-key-database-developer \
+      /tmp/pggomtm-production-identity-fixtures/api-key-database-developer.system-user \
+    && /tmp/pggomtm_oauth_smoke_client \
+      --expect-rejected \
+      /tmp/pggomtm-production-identity-fixtures/invalid-overlong-identity.jwt \
+      gomtm_candidate_ordinary \
+    && /tmp/pggomtm_oauth_smoke_client \
+      --expect-rejected \
+      /tmp/pggomtm-production-identity-fixtures/invalid-illegal-identity.jwt \
+      gomtm_candidate_ordinary \
+    && /tmp/pggomtm_oauth_smoke_fixture verify-codec-rejections \
+    && gosu postgres pg_ctl \
+      --pgdata=/tmp/pggomtm-production-identity-pgdata \
+      --mode=fast \
+      --wait stop \
+    && rm -rf \
+      /tmp/pggomtm-production-identity-pgdata \
+      /tmp/pggomtm-production-identity-fixtures \
+      /tmp/runtime-config-fixture \
+      /tmp/pggomtm_oauth_smoke_client \
+      /tmp/pggomtm_oauth_smoke_fixture \
+      /etc/pggomtm \
+      /usr/lib/postgresql/18/lib/pggomtm_identity_gate.so \
+    && touch /tmp/pggomtm-production-identity-passed
+
 FROM postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296
 
 COPY --from=abi-runtime-gate /tmp/pggomtm-abi-runtime-gate-passed /tmp/pggomtm-abi-runtime-gate-passed
 COPY --from=pgx-oauth-gate /tmp/pggomtm-oauth-smoke-passed /tmp/pggomtm-oauth-smoke-passed
+COPY --from=production-identity-gate /tmp/pggomtm-production-identity-passed /tmp/pggomtm-production-identity-passed
 COPY --from=build /src/target/release/libpggomtm.so /usr/lib/postgresql/18/lib/pggomtm.so
 
 RUN test -r /usr/lib/postgresql/18/lib/pggomtm.so \
     && test -f /tmp/pggomtm-abi-runtime-gate-passed \
     && test -f /tmp/pggomtm-oauth-smoke-passed \
+    && test -f /tmp/pggomtm-production-identity-passed \
     && test ! -e /usr/lib/postgresql/18/lib/pggomtm_abi_gate.so \
     && test ! -e /usr/lib/postgresql/18/lib/pggomtm_abi_runtime_probe.so \
     && test ! -e /usr/lib/postgresql/18/lib/pggomtm_config_gate.so \
@@ -307,4 +425,5 @@ RUN test -r /usr/lib/postgresql/18/lib/pggomtm.so \
       | grep --quiet libcurl \
     && rm \
       /tmp/pggomtm-abi-runtime-gate-passed \
-      /tmp/pggomtm-oauth-smoke-passed
+      /tmp/pggomtm-oauth-smoke-passed \
+      /tmp/pggomtm-production-identity-passed

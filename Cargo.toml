@@ -10,8 +10,8 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [[example]]
-name = "pggomtm_oauth_smoke_token"
-path = "examples/pggomtm_oauth_smoke_token.rs"
+name = "pggomtm_oauth_smoke_fixture"
+path = "examples/pggomtm_oauth_smoke_fixture.rs"
 required-features = ["pgx-oauth-gate"]
 
 [features]

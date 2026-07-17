@@ -1,7 +1,10 @@
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "libpq-fe.h"
 
@@ -10,51 +13,66 @@
 static const char *const expected_configuration =
 	"https://candidate.example.test/oauth/database/.well-known/openid-configuration";
 static const char *const expected_scope = "database";
-static const char *const expected_system_user =
-	"oauth:pggomtm:v1;u=usr_pgx_gate;actor=client:cli_pgx_gate;d=dlg_pgx_gate;m=oauth;a=1;p=ordinary";
-static const char *const expected_role = "gomtm_candidate_ordinary";
 static char *oauth_token;
 
 static int provide_oauth_token(PGauthData type, PGconn *conn, void *data);
 static char *read_token(const char *path);
 static void clear_token(char *token);
-static int verify_authenticated_session(PGconn *conn);
+static int verify_authenticated_session(PGconn *conn, const char *expected_role,
+									const char *system_user_path);
+static int write_system_user_fixture(const char *path, const char *value);
 
 int
 main(int argc, char **argv)
 {
-	static const char *const conninfo =
-		"host=/tmp port=5432 dbname=postgres user=gomtm_candidate_ordinary "
-		"oauth_issuer=https://candidate.example.test/oauth/database "
-		"oauth_client_id=pggomtm-smoke require_auth=oauth connect_timeout=5";
 	bool expect_allowed;
-	PGconn *conn;
+	const char *expected_role;
+	const char *system_user_path = NULL;
+	const char *const keywords[] = {
+		"host", "port", "dbname", "user", "oauth_issuer",
+		"oauth_client_id", "require_auth", "connect_timeout", NULL
+	};
+	const char *values[] = {
+		"/tmp", "5432", "postgres", NULL,
+		"https://candidate.example.test/oauth/database",
+		"pggomtm-smoke", "oauth", "5", NULL
+	};
+	PGconn *conn = NULL;
 	int status = EXIT_FAILURE;
 
-	if (argc != 3 ||
+	if (argc < 4 ||
 		(strcmp(argv[1], "--expect-allowed") != 0 &&
-		 strcmp(argv[1], "--expect-rejected") != 0))
+		 strcmp(argv[1], "--expect-rejected") != 0) ||
+		(strcmp(argv[1], "--expect-allowed") == 0 && argc != 5) ||
+		(strcmp(argv[1], "--expect-rejected") == 0 && argc != 4))
 	{
-		fprintf(stderr, "usage: %s --expect-allowed|--expect-rejected TOKEN_FILE\n",
+		fprintf(stderr,
+				"usage: %s --expect-allowed TOKEN_FILE ROLE SYSTEM_USER_FILE | "
+				"--expect-rejected TOKEN_FILE ROLE\n",
 				argv[0]);
 		return EXIT_FAILURE;
 	}
 	expect_allowed = strcmp(argv[1], "--expect-allowed") == 0;
+	expected_role = argv[3];
+	values[3] = expected_role;
+	if (expect_allowed)
+		system_user_path = argv[4];
 	oauth_token = read_token(argv[2]);
 	if (oauth_token == NULL)
 		return EXIT_FAILURE;
 
 	PQsetAuthDataHook(provide_oauth_token);
-	conn = PQconnectdb(conninfo);
-	if (PQstatus(conn) != CONNECTION_OK)
+	conn = PQconnectdbParams(keywords, values, 0);
+	if (conn == NULL || PQstatus(conn) != CONNECTION_OK)
 	{
-		const char *error = PQerrorMessage(conn);
+		const char *error = conn == NULL ? "libpq returned no connection" :
+			PQerrorMessage(conn);
 
 		if (!expect_allowed &&
 			strstr(error, "OAuth bearer authentication failed") != NULL &&
 			strstr(error, oauth_token) == NULL)
 		{
-			printf("PG18.4 OAuth tampered-token rejection smoke passed\n");
+			printf("PG18.4 OAuth rejection smoke passed\n");
 			status = EXIT_SUCCESS;
 		}
 		else
@@ -64,16 +82,17 @@ main(int argc, char **argv)
 
 	if (!expect_allowed)
 	{
-		fprintf(stderr, "tampered OAuth token unexpectedly authenticated\n");
+		fprintf(stderr, "rejected OAuth token unexpectedly authenticated\n");
 		goto done;
 	}
 
-	status = verify_authenticated_session(conn);
+	status = verify_authenticated_session(conn, expected_role, system_user_path);
 	if (status == EXIT_SUCCESS)
 		printf("PG18.4 OAuth allow, role and system_user smoke passed\n");
 
 done:
-	PQfinish(conn);
+	if (conn != NULL)
+		PQfinish(conn);
 	clear_token(oauth_token);
 	return status;
 }
@@ -158,7 +177,8 @@ clear_token(char *token)
 }
 
 static int
-verify_authenticated_session(PGconn *conn)
+verify_authenticated_session(PGconn *conn, const char *expected_role,
+							 const char *system_user_path)
 {
 	PGresult *result = PQexec(conn,
 		"SELECT system_user, current_user, current_setting('server_version_num')");
@@ -167,16 +187,70 @@ verify_authenticated_session(PGconn *conn)
 	if (result == NULL || PQresultStatus(result) != PGRES_TUPLES_OK ||
 		PQntuples(result) != 1 || PQnfields(result) != 3 ||
 		PQgetisnull(result, 0, 0) ||
-		strcmp(PQgetvalue(result, 0, 0), expected_system_user) != 0 ||
+		strncmp(PQgetvalue(result, 0, 0), "oauth:pggomtm:v1;",
+				strlen("oauth:pggomtm:v1;")) != 0 ||
 		strcmp(PQgetvalue(result, 0, 1), expected_role) != 0 ||
 		strcmp(PQgetvalue(result, 0, 2), "180004") != 0)
 	{
 		fprintf(stderr, "OAuth session identity or PG18.4 runtime did not match\n");
 		goto done;
 	}
+	status = write_system_user_fixture(system_user_path,
+										 PQgetvalue(result, 0, 0));
+
+done:
+	if (result != NULL)
+		PQclear(result);
+	return status;
+}
+
+static int
+write_system_user_fixture(const char *path, const char *value)
+{
+	const char *cursor;
+	size_t remaining;
+	int fd;
+	int status = EXIT_FAILURE;
+
+	if (path == NULL || value == NULL)
+		return EXIT_FAILURE;
+	cursor = value;
+	remaining = strlen(value);
+	if (remaining == 0)
+		return EXIT_FAILURE;
+	fd = open(path, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+	if (fd < 0)
+	{
+		perror("could not create system_user fixture");
+		return EXIT_FAILURE;
+	}
+
+	while (remaining > 0)
+	{
+		ssize_t written = write(fd, cursor, remaining);
+
+		if (written <= 0)
+		{
+			perror("could not write system_user fixture");
+			goto done;
+		}
+		cursor += written;
+		remaining -= (size_t) written;
+	}
+	if (fsync(fd) != 0)
+	{
+		perror("could not sync system_user fixture");
+		goto done;
+	}
 	status = EXIT_SUCCESS;
 
 done:
-	PQclear(result);
+	if (close(fd) != 0)
+	{
+		perror("could not close system_user fixture");
+		status = EXIT_FAILURE;
+	}
+	if (status != EXIT_SUCCESS)
+		unlink(path);
 	return status;
 }

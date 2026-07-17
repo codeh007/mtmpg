@@ -149,6 +149,14 @@ fn valid_api_key_token_preserves_credential_attribution() {
         AuthenticatedActor::ApiKeyCredential("crd_01J00000000000000000000000".into())
     );
     assert_eq!(verified.identity.auth_method, AuthMethod::ApiKey);
+    assert_eq!(
+        decode_authn_id(&verified.authn_id),
+        Ok(verified.identity.clone())
+    );
+    assert_eq!(
+        decode_system_user(&format!("oauth:{}", verified.authn_id)),
+        Ok(verified.identity)
+    );
 }
 
 #[test]
@@ -195,10 +203,18 @@ fn every_actor_profile_and_ttl_boundary_combination_is_valid() {
                 claims.authority_version
             );
             assert!(matches!(
-                (method, verified.identity.actor),
+                (method, &verified.identity.actor),
                 (AuthMethod::OAuth, AuthenticatedActor::OAuthClient(_))
                     | (AuthMethod::ApiKey, AuthenticatedActor::ApiKeyCredential(_))
             ));
+            assert_eq!(
+                decode_authn_id(&verified.authn_id),
+                Ok(verified.identity.clone())
+            );
+            assert_eq!(
+                decode_system_user(&format!("oauth:{}", verified.authn_id)),
+                Ok(verified.identity)
+            );
         }
     }
 }
@@ -558,11 +574,14 @@ fn identity_codec_rejects_ambiguity_unknown_versions_and_oversize_values() {
     };
     let encoded = identity.encode_authn_id().expect("encode identity");
 
-    assert_eq!(decode_authn_id(&encoded), Ok(identity));
-    assert!(decode_authn_id("pggomtm:v2:u=x").is_err());
+    assert_eq!(decode_authn_id(&encoded), Ok(identity.clone()));
+    let system_user = format!("oauth:{encoded}");
+    assert_eq!(decode_system_user(&system_user), Ok(identity));
+    assert!(decode_system_user(&system_user.replacen("pggomtm:v1", "pggomtm:v2", 1)).is_err());
     assert!(decode_authn_id("pggomtm:v1:u=x;actor=client:y").is_err());
     assert!(decode_system_user(&format!("scram:{}", encoded)).is_err());
     assert!(decode_authn_id(&"x".repeat(MAX_AUTHN_ID_BYTES + 1)).is_err());
+    assert!(decode_system_user(&format!("oauth:{}", "x".repeat(MAX_AUTHN_ID_BYTES + 1))).is_err());
 }
 
 #[test]
