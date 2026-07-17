@@ -13,7 +13,7 @@
 - 当前无 gate 的最终制品要求每个新 OAuth backend 在 startup 从固定只读路径建立独立 config/public JWKS snapshot；材料缺失、损坏、可写或不满足同目录同文件系统的原子发布布局时 startup fail closed。
 - 正式 validate callback 消费该 snapshot，严格验证ES256签名、唯一issuer/audience、database scope、30至300秒TTL与deny-unknown claims；合法候选token返回PostgreSQL allocator分配的版本化`authn_id`，tampered或不合规token保持未授权。
 - Production build对normal dependency tree、production源码、ELF `DT_NEEDED`、未解析符号和敏感字符串执行离线能力门禁，拒绝HTTP/DNS、libcurl/libpq、SQL/SPI、私钥加载、service credential、在线introspection和issuer fallback入口。
-- 认证失败遵循[版本化reason-code与可见性契约](docs/authentication-failures.md)：服务端只记录稳定脱敏类别，客户端只接收PostgreSQL通用OAuth失败。
+- 认证失败遵循[版本化reason-code与可见性契约](docs/authentication-failures.md)：服务端只记录稳定脱敏类别；普通token拒绝对客户端保持通用，startup失败最多暴露稳定code。
 - `abi-gate`、`abi-runtime-gate` 与 `pgx-oauth-gate` 只用于测试。内置的确定性 key、公开 JSON Web Key Set（JWKS）和 token fixture 不得用于生产。
 
 当前状态不是 `production-ready`。仓库没有已发布的 `stable` 发布版、生产支持版本或可供部署固定的 GitHub Container Registry（GHCR）开放容器计划（OCI）摘要。

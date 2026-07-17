@@ -1,8 +1,9 @@
 # 认证失败reason-code与可见性契约
 
 本页定义`pggomtm`认证失败的版本化reason-code、PostgreSQL服务端日志级别和客户端
-可见性。Reason-code只用于服务端诊断与自动化分类，不是授权结果，也不能被客户端
-用作放宽或fallback依据。
+可见性。Reason-code主要用于服务端诊断与自动化分类，不是授权结果，也不能被客户端
+用作放宽或fallback依据。PostgreSQL会把startup callback的`ERROR` code暴露给当前失败
+连接，但普通token拒绝不会向客户端暴露细分code。
 
 ## 使用闭集`pggomtm-auth/v1`
 
@@ -44,14 +45,14 @@
 | 失败类型 | Module/PostgreSQL服务端级别 | 客户端可见内容 |
 | --- | --- | --- |
 | Token、role或identity拒绝 | `LOG`，`pggomtm authentication rejected: reason=<code>` | PostgreSQL通用OAuth认证失败 |
-| Startup config/JWKS错误 | `ERROR`，`pggomtm authentication failed: reason=<code>` | PostgreSQL通用OAuth认证失败 |
+| Startup config/JWKS错误 | `ERROR`，`pggomtm authentication failed: reason=<code>` | 同一稳定startup code，不含底层文本 |
 | 捕获的内部panic | `LOG`，`internal-panic` | PostgreSQL通用OAuth认证失败 |
 | PostgreSQL ERROR | `ERROR`，`postgres-error` | 当前认证失败，不暴露module诊断code |
 
-`LOG`用于预期的单次认证拒绝，默认只进入服务端日志。客户端不得看到
-`pggomtm-auth/`、`reason=`、config/JWKS诊断或Rust内部信息。PostgreSQL拥有客户端通用
-错误文案；调用方应按认证失败处理，不能解析自然语言来推断签名、`kid`、claims或role
-细节。
+`LOG`用于预期的单次认证拒绝，默认只进入服务端日志。Token、role和identity拒绝的
+客户端不得看到`pggomtm-auth/`或`reason=`；startup失败最多暴露对应的稳定code，不能
+附带底层文件、config/JWKS或Rust诊断。调用方都应按认证失败处理，不能根据code或自然
+语言切换认证方式，也不能用它推断签名、`kid`、claims或role细节。
 
 ## 禁止记录认证材料
 

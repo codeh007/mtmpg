@@ -340,7 +340,7 @@ RUN mkdir --mode=0700 /tmp/pggomtm-production-identity-pgdata \
       generate \
       /tmp/pggomtm-production-identity-fixtures \
     && /tmp/pggomtm_oauth_smoke_client \
-      --expect-rejected \
+      --expect-startup-rejected \
       /tmp/pggomtm-production-identity-fixtures/oauth-ordinary.jwt \
       gomtm_candidate_ordinary \
     && mkdir --mode=0555 /etc/pggomtm \

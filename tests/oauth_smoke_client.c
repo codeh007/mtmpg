@@ -18,7 +18,8 @@ static char *oauth_token;
 static int provide_oauth_token(PGauthData type, PGconn *conn, void *data);
 static char *read_token(const char *path);
 static void clear_token(char *token);
-static bool rejected_connection_is_redacted(const char *error);
+static bool rejected_connection_is_redacted(const char *error,
+										 bool expect_startup_reason);
 static int verify_authenticated_session(PGconn *conn, const char *expected_role,
 									const char *system_user_path);
 static int write_system_user_fixture(const char *path, const char *value);
@@ -27,6 +28,7 @@ int
 main(int argc, char **argv)
 {
 	bool expect_allowed;
+	bool expect_startup_reason;
 	const char *expected_role;
 	const char *system_user_path = NULL;
 	const char *const keywords[] = {
@@ -43,17 +45,20 @@ main(int argc, char **argv)
 
 	if (argc < 4 ||
 		(strcmp(argv[1], "--expect-allowed") != 0 &&
-		 strcmp(argv[1], "--expect-rejected") != 0) ||
+		 strcmp(argv[1], "--expect-rejected") != 0 &&
+		 strcmp(argv[1], "--expect-startup-rejected") != 0) ||
 		(strcmp(argv[1], "--expect-allowed") == 0 && argc != 5) ||
-		(strcmp(argv[1], "--expect-rejected") == 0 && argc != 4))
+		(strcmp(argv[1], "--expect-allowed") != 0 && argc != 4))
 	{
 		fprintf(stderr,
 				"usage: %s --expect-allowed TOKEN_FILE ROLE SYSTEM_USER_FILE | "
-				"--expect-rejected TOKEN_FILE ROLE\n",
+				"--expect-rejected|--expect-startup-rejected TOKEN_FILE ROLE\n",
 				argv[0]);
 		return EXIT_FAILURE;
 	}
 	expect_allowed = strcmp(argv[1], "--expect-allowed") == 0;
+	expect_startup_reason =
+		strcmp(argv[1], "--expect-startup-rejected") == 0;
 	expected_role = argv[3];
 	values[3] = expected_role;
 	if (expect_allowed)
@@ -69,7 +74,8 @@ main(int argc, char **argv)
 		const char *error = conn == NULL ? "libpq returned no connection" :
 			PQerrorMessage(conn);
 
-		if (!expect_allowed && rejected_connection_is_redacted(error))
+		if (!expect_allowed &&
+			rejected_connection_is_redacted(error, expect_startup_reason))
 		{
 			printf("PG18.4 OAuth rejection smoke passed\n");
 			status = EXIT_SUCCESS;
@@ -176,13 +182,23 @@ clear_token(char *token)
 }
 
 static bool
-rejected_connection_is_redacted(const char *error)
+rejected_connection_is_redacted(const char *error,
+								bool expect_startup_reason)
 {
-	return error != NULL &&
-		strstr(error, "OAuth bearer authentication failed") != NULL &&
-		strstr(error, oauth_token) == NULL &&
-		strstr(error, "pggomtm-auth/") == NULL &&
-		strstr(error, "reason=") == NULL &&
+	bool category_matches;
+
+	if (error == NULL)
+		return false;
+	if (expect_startup_reason)
+		category_matches =
+			strstr(error, "pggomtm-auth/v1/config-missing") != NULL;
+	else
+		category_matches =
+			strstr(error, "OAuth bearer authentication failed") != NULL &&
+			strstr(error, "pggomtm-auth/") == NULL &&
+			strstr(error, "reason=") == NULL;
+
+	return category_matches && strstr(error, oauth_token) == NULL &&
 		strstr(error, "JWKS") == NULL &&
 		strstr(error, "postgresql://") == NULL &&
 		strstr(error, "stack backtrace") == NULL &&
