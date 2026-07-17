@@ -271,6 +271,50 @@ fn real_generator_rejects_unapproved_provenance_inputs() {
         fixture.path("clean-cwd"),
     );
     assert_generated_from_approved_header(&success, "approved official header");
+    let expected_bindings = fs::read(success.out_dir.join(BINDINGS_FILE))
+        .expect("read approved final OAuth bindings bytes");
+
+    let rustfmt_probe = fixture.path("rustfmt-env-probe/rustfmt");
+    let rustfmt_marker = fixture.path("rustfmt-env-probe-executed");
+    write_stateful_rustfmt_probe(&rustfmt_probe, &rustfmt_marker);
+    let rustfmt_env = run_generator(
+        &fixture,
+        &build_script,
+        &official_pg_config,
+        "rustfmt-env-probe",
+        [("RUSTFMT", rustfmt_probe.into_os_string())],
+        fixture.path("clean-cwd"),
+    );
+    let rustfmt_env_violation =
+        ambient_formatter_violation(&rustfmt_env, &expected_bindings, &rustfmt_marker);
+
+    let path_rustfmt_dir = fixture.path("path-rustfmt-probe-bin");
+    let path_rustfmt = path_rustfmt_dir.join("rustfmt");
+    let path_rustfmt_marker = fixture.path("path-rustfmt-probe-executed");
+    write_stateful_rustfmt_probe(&path_rustfmt, &path_rustfmt_marker);
+    let path = format!(
+        "{}:/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        path_rustfmt_dir
+            .to_str()
+            .expect("rustfmt probe path must be UTF-8")
+    );
+    let path_rustfmt_run = run_generator(
+        &fixture,
+        &build_script,
+        &official_pg_config,
+        "path-rustfmt-probe",
+        [("PATH", OsString::from(path))],
+        fixture.path("clean-cwd"),
+    );
+    let path_rustfmt_violation =
+        ambient_formatter_violation(&path_rustfmt_run, &expected_bindings, &path_rustfmt_marker);
+    assert!(
+        rustfmt_env_violation.is_none() && path_rustfmt_violation.is_none(),
+        "ambient formatter changed the final OUT_DIR bytes after validation:\nRUSTFMT: {}\nPATH/rustfmt: {}",
+        rustfmt_env_violation.as_deref().unwrap_or("isolated"),
+        path_rustfmt_violation.as_deref().unwrap_or("isolated"),
+    );
+
     let stdout = String::from_utf8_lossy(&success.output.stdout);
     for variable in rerun_environment_names() {
         assert!(
@@ -361,6 +405,31 @@ fn assert_generated_from_approved_header(run: &GeneratorRun, scenario: &str) {
     );
 }
 
+fn ambient_formatter_violation(
+    run: &GeneratorRun,
+    expected_bindings: &[u8],
+    marker: &Path,
+) -> Option<String> {
+    if !run.output.status.success() {
+        return Some(format!(
+            "generator failed before the final-byte check: {}",
+            String::from_utf8_lossy(&run.output.stderr)
+        ));
+    }
+    let actual_bindings = match fs::read(run.out_dir.join(BINDINGS_FILE)) {
+        Ok(bindings) => bindings,
+        Err(error) => return Some(format!("final OAuth bindings could not be read: {error}")),
+    };
+    if actual_bindings != expected_bindings || marker.exists() {
+        return Some(format!(
+            "formatter_executed={}, output={}",
+            marker.exists(),
+            generated_summary(&run.out_dir)
+        ));
+    }
+    None
+}
+
 fn generated_summary(out_dir: &Path) -> String {
     fs::read_to_string(out_dir.join(BINDINGS_FILE))
         .map(|generated| generated.lines().take(4).collect::<Vec<_>>().join(" | "))
@@ -448,6 +517,25 @@ fn write_clang_probe(path: &Path, marker: &Path) {
         .permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(path, permissions).expect("make clang probe executable");
+}
+
+fn write_stateful_rustfmt_probe(path: &Path, marker: &Path) {
+    let marker = marker.to_str().expect("rustfmt marker path must be UTF-8");
+    assert!(
+        !marker.contains(['\n', '\r', '\'']),
+        "rustfmt marker path must be shell-safe"
+    );
+    write_file(
+        path,
+        &format!(
+            "#!/bin/sh\nset -eu\nif [ -e '{marker}' ]; then\n  /usr/local/cargo/bin/rustfmt \"$@\" | sed 's/{APPROVED_MAGIC}/{ATTACK_MAGIC}/g'\nelse\n  : > '{marker}'\n  exec /usr/local/cargo/bin/rustfmt \"$@\"\nfi\n"
+        ),
+    );
+    let mut permissions = fs::metadata(path)
+        .expect("rustfmt probe metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).expect("make rustfmt probe executable");
 }
 
 fn link_official_include_entries(source: &Path, destination: &Path) {
