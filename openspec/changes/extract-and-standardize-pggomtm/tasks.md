@@ -12,12 +12,13 @@
 - [x] 2.3 配置Dependabot只创建Cargo与GitHub Actions更新PR，禁止native认证依赖、Rust patch或PostgreSQL minor自动合并
 - [x] 2.4 收紧GitHub Actions为批准来源和full-SHA pin，保持默认workflow token只读，设置合并后删分支与批准的merge策略，并记录private套餐无法启用branch protection/rulesets的真实限制
 - [x] 2.5 检查仓库描述、topics、issue/security/release设置与私有可见性，保持private默认且不擅自升级套餐或公开package
+- [ ] 2.6 审查当前本地`main`领先`origin/main`且功能分支已删除的状态，从精确已审查commit非force push远端`issue-116-extract-pggomtm`功能ref，确认remote commit一致并保持`origin/main`不变，为远端CI和prerelease建立可审计source identity
 
 ## 3. 官方OAuth ABI与pgrx边界
 
-- [ ] 3.1 先增加失败测试，要求ABI类型与magic来自目标`pg_config --includedir-server/libpq/oauth.h`生成结果而不是手写Rust声明
-- [ ] 3.2 实现最小build-time allowlist bindings，固定并记录官方header digest，拒绝缺失symbol、未知layout或非批准server headers
-- [ ] 3.3 保留官方C size/offset/layout probe并与生成Rust bindings交叉验证，覆盖state/result/callback、magic和init signature
+- [ ] 3.1 先增加tracked RED门禁，真实证明恶意`RUSTFMT`与`PATH/rustfmt`可被检测，并要求ABI类型/magic来自目标官方`oauth.h`且被校验字节与最终`OUT_DIR`编译字节完全一致
+- [ ] 3.2 实现最小build-time allowlist bindings，禁用外部formatter并单次materialize生成结果，固定官方header与最终bindings digest，拒绝ambient formatter、缺失symbol、未知layout或非批准server headers
+- [ ] 3.3 对同一份materialized字节完成allowlist验证后直接原样写入`OUT_DIR`，保留官方C size/offset/layout probe并交叉验证state/result/callback、magic、init signature及最终文件digest，禁止校验后的二次序列化
 - [ ] 3.4 删除源码中的手写OAuth ABI struct/magic权威与冗余direct `pgrx-pg-sys`依赖，只通过完整pgrx的`pg_sys`、module magic、guard、error和allocator接口实现FFI
 - [ ] 3.5 覆盖startup/validate/shutdown的null、panic、PostgreSQL ERROR、allocator、错误magic与缺失callback负向矩阵，证明任一异常在真实backend中fail closed
 
@@ -47,7 +48,7 @@
 
 ## 7. 可重复CI与供应链门禁
 
-- [ ] 7.1 增加PR/main CI，使用full-SHA actions和read-only权限运行Rustfmt、Clippy `-D warnings`、locked unit/integration tests及所有ABI/JWT/runtime gates
+- [ ] 7.1 在远端功能ref上增加PR/main CI，使用full-SHA actions和read-only权限从精确remote commit运行Rustfmt、Clippy `-D warnings`、locked unit/integration tests及所有ABI/JWT/runtime/final-byte provenance gates
 - [ ] 7.2 增加Cargo依赖、RustSec与许可证审计，对完整pgrx transitive advisory逐项记录理由和复核期限，不使用全局ignore或自动放宽
 - [ ] 7.3 用Docker Buildx和registry cache建立clean-checkout PG18.4 build，验证固定source/header checksum、base digest、真实loader/OAuth和最终runtime filesystem
 - [ ] 7.4 增加Git history、workflow log、build context/cache、image、bundle、SBOM与manifest的secret/运行数据泄漏扫描，任一命中阻止发布
@@ -57,24 +58,25 @@
 
 - [ ] 8.1 定义并生成`release-manifest.json`，完整记录source、module/contract版本、toolchain/dependencies、PG build/test minor、header/base digest、target/libc、`.so`/OCI digest和验证结果
 - [ ] 8.2 发布versioned正负向database-token、role和authn-id测试向量，让gomtmui issuer集成测试能固定消费且不包含任何真实key/token
-- [ ] 8.3 建立最小权限release workflow，从同一clean checkout一次构建`ghcr.io/codeh007/mtmpg-postgres` version/short-SHA标签并输出不可变OCI digest；只有stable release额外更新`latest`
+- [ ] 8.3 建立最小权限release workflow：alpha/RC使用其prerelease version且不可晋级；最终版本commit只构建一次short-SHA stable candidate并输出不可变OCI digest，只有E2E通过后的stable release为同一digest增加version/`latest`发现别名
 - [ ] 8.4 生成按PG/runtime target命名的tar.zst、`SHA256SUMS`、MIT license、SBOM和binary/container provenance/attestation，验证所有digest与manifest一致
 - [ ] 8.5 建立immutable GitHub Release并拒绝覆盖既有tag/asset；Actions临时artifact只用于job传递且不得成为正式安装URL
 - [ ] 8.6 文档化private GHCR的read-only pull credential边界，确保credential只由部署secret authority注入且不进入Compose、image、manifest或Release
-- [ ] 8.7 在native、CI与prerelease门禁就绪后提交并推送`issue-116-extract-pggomtm`功能分支，确认远程commit与本地source identity一致且不合并到`main`
+- [ ] 8.7 在native、CI与release workflow就绪后复核远端功能ref仍精确指向拟发布source commit，确认远程CI证据与本地source identity一致且未提前合并到`main`
 
 ## 9. Prerelease、跨仓库验收与stable门禁
 
-- [ ] 9.1 从已推送功能分支commit只发布明确short-SHA或`v0.1.0-alpha.*` prerelease，验证没有创建/更新`latest`且不存在stable/production可用误报
-- [ ] 9.2 向gomtmui提供prerelease OCI digest、manifest与contract向量，等待其hard-cut change完成固定消费、真实PG18 OAuth、identity、ACL/RLS和executor candidate E2E
-- [ ] 9.3 复核gomtmui验收使用与mtmpg相同的source/OCI digest，且gomtmui运行代码、build配置和active tests不再依赖本地Rust源码或`gomtm-pggomtm:*`标签
-- [ ] 9.4 只有production feature、native矩阵、无gate扫描和gomtmui candidate E2E全部通过后才记录stable readiness；在功能分支尚未合并到`main`时不得创建stable Release或更新`latest`
-- [ ] 9.5 演练切换新digest与滚动切回上一已验证digest，确认不热覆盖`.so`、不恢复第二源码或认证fallback，并记录既有backend不会随token撤销自动终止
+- [ ] 9.1 若需要alpha/RC，使用与prerelease module version一致的tag、manifest和OCI digest只验证pipeline，证明它不能增加stable tag、更新`latest`或作为stable digest晋级；若不需要则记录跳过且不得混入stable-candidate证据
+- [ ] 9.2 在远端功能分支冻结最终`MAJOR.MINOR.PATCH` commit，从该commit只构建一次并仅发布short-SHA stable candidate，验证没有提前创建stable Git tag、Release、version tag或`latest`
+- [ ] 9.3 向gomtmui提供该最终版本short-SHA candidate的OCI digest、manifest与contract向量，等待其hard-cut change完成固定消费、真实PG18 OAuth、identity、ACL/RLS和executor candidate E2E
+- [ ] 9.4 复核gomtmui验收使用与mtmpg相同的remote source/OCI digest，且gomtmui运行代码、build配置和active tests不再依赖本地Rust源码或`gomtm-pggomtm:*`标签
+- [ ] 9.5 只有production feature、native矩阵、无gate扫描和gomtmui candidate E2E全部通过后才记录stable readiness；在已验证remote commit尚未fast-forward到`main`时不得创建stable Release或更新`latest`
+- [ ] 9.6 演练切换新digest与滚动切回上一已验证digest，确认不热覆盖`.so`、不恢复第二源码或认证fallback，并记录既有backend不会随token撤销自动终止
 
 ## 10. 最终验证、推送与交付证据
 
 - [ ] 10.1 从clean checkout运行全部Rust、C probe、Docker、真实PG18 OAuth、依赖/许可证、secret、SBOM/provenance和artifact隔离门禁
 - [ ] 10.2 运行`git diff --check`与`openspec validate extract-and-standardize-pggomtm --strict`，确认tracked tree不含`target/`、secret、data、临时artifact或重复实现
-- [ ] 10.3 完成whole-branch review并审查Git diff、release manifest与GitHub设置，把已完成跨仓库验收的功能分支以fast-forward原样推进并按Issue #116明确授权推送到`origin/main`，确认remote main与已验证branch HEAD为同一commit且不得force push
+- [ ] 10.3 完成whole-branch review并审查Git diff、release manifest与GitHub设置，把远端功能ref中已完成跨仓库验收的精确commit以fast-forward原样推进并按Issue #116明确授权推送到`origin/main`，确认remote main、consumer证据与已验证source为同一commit且不得force push
 - [ ] 10.4 从该main commit为已经验证的同一OCI digest创建首个stable immutable Release与`latest`别名，确认没有重新构建、覆盖既有release或改变attestation identity
 - [ ] 10.5 汇总mtmpg commit、OCI/release digest、SBOM/attestation、验证矩阵、已知限制和gomtmui consumer证据，供Issue #116在两个仓库工作全部结束后统一回填

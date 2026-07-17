@@ -11,6 +11,10 @@
 - **WHEN** gomtmui构建或部署PostgreSQL candidate
 - **THEN** 它 SHALL 消费mtmpg发布的固定OCI digest和versioned contract，不得从本地Rust目录重新构建
 
+#### Scenario: 远端CI需要可审计source
+- **WHEN** 迁移基线已通过但本地`main`领先远端且没有功能分支
+- **THEN** 维护者 SHALL在运行远端CI或prerelease前把精确已审查commit非force push到远端功能ref，保持`origin/main`不变，并让后续证据关联该remote commit
+
 ### Requirement: 仓库必须具备明确安全与维护契约
 仓库 SHALL 提供准确README、MIT LICENSE、SECURITY、贡献与发布说明、支持矩阵、升级策略和非`CREATE EXTENSION`安装边界。GitHub设置 SHALL 在当前套餐允许范围内采用最小权限Actions、full-SHA action引用、read-only默认workflow token、批准的merge策略与合并后删分支；无法启用的branch protection/rulesets MUST如实记录而不得伪报。
 
@@ -23,11 +27,11 @@
 - **THEN** 普通CI SHALL只获得read权限，release job SHALL只显式获得写Release、GHCR和attestation所需的最小权限
 
 ### Requirement: CI必须从固定输入重复验证native安全边界
-每个pull request与main push SHALL 对locked依赖运行Rustfmt、Clippy `-D warnings`、unit/integration tests、依赖与许可证审计、官方header binding/layout、真实PG18 loader/OAuth正负矩阵、动态依赖、secret和artifact隔离扫描。CI MUST使用固定Rust、pgrx、JOSE、PostgreSQL source/runtime digest和full-SHA actions；native认证依赖与PG minor更新 MUST只通过人工审查PR进入。
+每个pull request与main push SHALL 对locked依赖运行Rustfmt、Clippy `-D warnings`、unit/integration tests、依赖与许可证审计、官方header binding/layout与最终字节同一性、真实PG18 loader/OAuth正负矩阵、动态依赖、secret和artifact隔离扫描。CI MUST从远端可达的精确source commit运行并使用固定Rust、pgrx、JOSE、PostgreSQL source/runtime digest和full-SHA actions；native认证依赖与PG minor更新 MUST只通过人工审查PR进入。
 
 #### Scenario: 合法变更通过CI
 - **WHEN** clean checkout在批准输入上完成全部静态与真实PostgreSQL门禁
-- **THEN** CI SHALL 产生可关联source commit的成功证据，并且不得依赖开发者本地Cargo cache或未跟踪文件
+- **THEN** CI SHALL 产生可关联远端source commit的成功证据，并且不得依赖开发者本地Cargo cache、仅本地分支或未跟踪文件
 
 #### Scenario: ABI或供应链门禁失败
 - **WHEN** header/layout、OAuth矩阵、lock审计、动态依赖、secret扫描或artifact隔离任一失败
@@ -67,11 +71,15 @@ Release SHALL 发布基于精确官方`postgres:<minor>-bookworm@sha256:<digest>
 - **THEN** gomtmui SHALL 拒绝该artifact且不得回退到本地build或旧协议适配器
 
 ### Requirement: Stable发布必须晚于正式runtime与跨仓库验收
-源码迁移、CI或测试feature完成 MAY只产生short-SHA image或GitHub prerelease。首个stable release SHALL要求production feature读取外部只读config/JWKS、真实PG18 OAuth allow/deny、role/identity、无gate artifact扫描和gomtmui candidate集成全部通过；同一tag MUST只构建一次，后续环境 MUST晋级相同OCI digest。
+源码迁移、CI或测试feature完成 MAY产生带prerelease module version的alpha/RC，但该artifact MUST NOT直接增加stable tag或晋级同一digest。可晋级stable candidate SHALL来自远端功能分支上已经冻结最终`MAJOR.MINOR.PATCH`的commit，从该commit只构建一次并先只发布short-SHA身份。首个stable release SHALL要求production feature读取外部只读config/JWKS、真实PG18 OAuth allow/deny、role/identity、无gate artifact扫描和gomtmui对同一source/OCI digest的candidate集成全部通过；stable tag、Release与`latest` MUST引用已经验证的digest且不得触发重建。
 
 #### Scenario: 仅ABI/JWT原型通过
 - **WHEN** callback正常feature仍默认拒绝或依赖内置gate JWKS
-- **THEN** workflow MAY从已推送功能分支commit发布明确alpha/sha制品，但 MUST NOT发布或更新`latest`、stable说明或生产可用声明
+- **THEN** workflow MAY从已推送功能分支commit发布明确alpha/RC制品验证pipeline，但 MUST NOT把该prerelease digest改标为stable、发布或更新`latest`、stable说明或生产可用声明
+
+#### Scenario: 最终版本SHA candidate进入跨仓库验收
+- **WHEN** 功能分支已冻结最终module version且正式runtime与native门禁通过
+- **THEN** workflow SHALL从该远端commit只构建一次并只发布short-SHA candidate身份，gomtmui SHALL使用同一source与OCI digest完成E2E
 
 #### Scenario: Stable门禁全部通过
 - **WHEN** mtmpg native矩阵和gomtmui candidate E2E都引用同一source与OCI digest并成功

@@ -12,15 +12,23 @@
 - **THEN** PostgreSQL SHALL 在接受OAuth连接前fail closed，且不得尝试第二validator或认证fallback
 
 ### Requirement: OAuth ABI必须由目标PostgreSQL官方header生成
-构建 SHALL 通过目标`pg_config --includedir-server/libpq/oauth.h`生成只包含OAuth magic、state/result/callback类型的allowlisted Rust bindings，并 SHALL 用官方C compiler执行layout probe。手写Rust struct、复制magic常量或其他生成结果 MUST NOT成为独立ABI权威。
+构建 SHALL通过目标`pg_config --includedir-server/libpq/oauth.h`生成只包含OAuth magic、state/result/callback类型的allowlisted Rust bindings，并 SHALL用官方C compiler执行layout probe。Bindings SHALL在禁用外部formatter后单次materialize；被校验的精确字节 MUST原样写入`OUT_DIR`并成为编译输入，校验后 MUST NOT再次调用formatter、subprocess或二次序列化。`RUSTFMT`、`PATH/rustfmt`和其他ambient formatter MUST NOT被执行或改变最终字节。手写Rust struct、复制magic常量或其他生成结果 MUST NOT成为独立ABI权威。
 
 #### Scenario: Header与Rust layout一致
 - **WHEN** 构建使用批准的PG18 server-development headers
-- **THEN** 生成bindings、C size/offset probe、header digest与callback调用布局 SHALL 全部一致后才允许产生artifact
+- **THEN** 生成bindings、C size/offset probe、header digest、最终`OUT_DIR`字节digest与callback调用布局 SHALL全部一致后才允许产生artifact
 
 #### Scenario: Header缺失或ABI变化
 - **WHEN** `oauth.h`缺失、digest未获批准、allowlisted符号不存在或C/Rust layout不一致
 - **THEN** 构建 SHALL 失败且不得回退到仓库内手写ABI声明
+
+#### Scenario: 恶意RUSTFMT尝试改写已校验magic
+- **WHEN** 构建环境把`RUSTFMT`指向恶意formatter或把恶意`rustfmt`放到`PATH`首位，并尝试在校验后改写OAuth magic
+- **THEN** formatter SHALL不被执行或最终`OUT_DIR`字节 SHALL保持与已校验字节完全一致，否则构建与发布门禁必须失败
+
+#### Scenario: 校验后发生二次转换
+- **WHEN** 生成链尝试用独立写文件API、formatter或其他后处理重新序列化已校验bindings
+- **THEN** provenance门禁 SHALL拒绝该链路，且不得仅凭header digest或内存字符串校验声明最终编译输入可信
 
 ### Requirement: pgrx必须只承担已验证的PostgreSQL FFI安全职责
 crate SHALL 直接使用固定完整`pgrx`的PG18 feature提供module magic、guard、PostgreSQL error和allocator接口，并 SHALL 通过`pgrx::pg_sys`访问所需raw symbol。没有源码直接使用的`pgrx-pg-sys`依赖 MUST被移除；任何移除完整pgrx的重构 MUST先证明panic、PostgreSQL ERROR、allocator和真实loader矩阵不退化。

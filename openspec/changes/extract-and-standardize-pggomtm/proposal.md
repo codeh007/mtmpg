@@ -5,11 +5,12 @@
 ## What Changes
 
 - **BREAKING**：把 `pggomtm` 的唯一源码、测试、Cargo lock、toolchain 和 Docker build authority 从 `gomtmui/native/pggomtm/` 硬切到 `mtmpg` 仓库根目录；不保留 submodule、subtree、vendored copy、镜像 fallback 或第二构建实现。
-- 保留完整 `pgrx` 作为 PostgreSQL module magic、panic/error guard 和 allocator 安全层，删除冗余的直接 `pgrx-pg-sys` 依赖；OAuth callback ABI 改为从目标 PostgreSQL 官方 `libpq/oauth.h` 生成的最小 allowlist bindings，而不是手写结构体权威。
-- 完成唯一离线 validator runtime：只读本地 public JWKS/config、严格 ES256 database JWT、requested role 精确绑定、版本化 `authn_id`、受控 reload 和 fail-closed 错误边界；不增加 HTTP、SQL、SPI、私钥、在线 introspection 或认证 fallback。
+- 保留完整 `pgrx` 作为 PostgreSQL module magic、panic/error guard 和 allocator 安全层，删除冗余的直接 `pgrx-pg-sys` 依赖；OAuth callback ABI 改为从目标 PostgreSQL 官方 `libpq/oauth.h` 生成的最小 allowlist bindings，而不是手写结构体权威。Bindings必须单次materialize，校验的精确字节必须原样写入`OUT_DIR`并成为编译输入，禁用验证后的外部formatter或二次序列化，恶意`RUSTFMT`与`PATH/rustfmt`不得改变产物。
+- 完成唯一离线 validator runtime：每个新OAuth backend从只读本地public JWKS/config建立不可变startup snapshot，严格验证ES256 database JWT、requested role与版本化`authn_id`并fail closed；轮换不依赖SIGHUP、网络fetch、既有backend reload或跨backend共享缓存，也不增加HTTP、SQL、SPI、私钥、在线introspection或认证fallback。
 - 纠正 PostgreSQL 兼容门禁：构建、测试和发布元数据精确记录实际 minor 与 headers，但 runtime 依赖 PostgreSQL major module magic 和 OAuth validator magic，不以 `sversion == 180004` 阻断同一 PG18 stable line 的安全升级；每个拟部署 minor 仍必须先完成独立真实验证并由消费者固定镜像 digest。
 - 建立仓库规范：README、MIT LICENSE、SECURITY、贡献/发布说明、最小权限 GitHub Actions、依赖更新策略，以及在当前 GitHub 套餐能力内可执行的默认分支与发布治理。
 - 建立可重复 CI/CD：格式、lint、测试、官方 header/layout、真实 PostgreSQL loader/OAuth、负向认证、动态依赖、secret 与产物隔离门禁。
+- 在远端CI、prerelease与GHCR门禁运行前，先把经本地迁移基线审查的精确source commit推送到远端功能分支；当前本地`main`领先而功能分支已删除的状态不得继续作为长期唯一副本，`origin/main`仍保持到跨仓库验收后才fast-forward。
 - 以 GHCR 中基于精确官方 PostgreSQL image 的派生 runtime image 作为主要部署物；以 immutable GitHub Release tarball、checksum、release manifest、SBOM 和 provenance/attestation 作为辅助交付与取证材料。正式消费者必须按 digest 安装，不得依赖可变 tag 或在运行容器中热覆盖 `.so`。
 - 发布版本化 consumer contract 与兼容元数据，让 gomtmui 只负责 issuer、delegation、数据库 role/RLS、executor 和平台编排，并通过固定 release/digest 消费 `pggomtm`。
 
@@ -17,7 +18,7 @@
 
 ### New Capabilities
 
-- `pggomtm-validator-module`: 定义独立 Rust PostgreSQL 18 OAuth validator 的官方 ABI 来源、离线 JWT/JWKS 验证、role/identity、reload、fail-closed 与 PG18 stable-line 兼容边界。
+- `pggomtm-validator-module`: 定义独立 Rust PostgreSQL 18 OAuth validator 的官方 ABI 来源与最终字节同一性、离线 JWT/JWKS startup snapshot、role/identity、fail-closed 与 PG18 stable-line 兼容边界。
 - `pggomtm-release-supply-chain`: 定义独立仓库治理、可重复 CI、GHCR runtime image、immutable Release、manifest、SBOM、provenance、版本兼容和消费者按 digest 安装契约。
 
 ### Modified Capabilities
