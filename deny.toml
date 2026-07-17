@@ -1,0 +1,46 @@
+[graph]
+targets = [{ triple = "x86_64-unknown-linux-gnu" }]
+all-features = false
+no-default-features = true
+features = ["pg18"]
+
+[advisories]
+git-fetch-with-cli = true
+ignore = [
+  { id = "RUSTSEC-2021-0127", reason = "serde_cbor 0.11.2 is an unmaintained pgrx 0.19.1 transitive dependency with no safe upgrade; reviewed 2026-07-17, recheck by 2026-08-17 and before any pgrx or stable release change; see docs/dependency-audit.md" },
+]
+
+[licenses]
+include-dev = true
+include-build = true
+unused-allowed-license = "deny"
+allow = [
+  "Apache-2.0",
+  "BSD-3-Clause",
+  "ISC",
+  "MIT",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+ignore = false
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow = []
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

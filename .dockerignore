@@ -5,6 +5,7 @@
 !Cargo.lock
 !build.rs
 !rust-toolchain.toml
+!deny.toml
 !examples/
 !examples/**
 !src/

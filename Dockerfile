@@ -45,11 +45,33 @@ RUN curl --fail --location --proto '=https' --tlsv1.2 \
     && make install \
     && test "$(/opt/postgresql-18.4/bin/pg_config --version)" = "PostgreSQL 18.4"
 
+RUN curl --fail --location --proto '=https' --tlsv1.2 \
+      --output /tmp/cargo-deny.tar.gz \
+      https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz \
+    && echo "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f  /tmp/cargo-deny.tar.gz" \
+      | sha256sum --check --strict \
+    && tar --extract --gzip --file /tmp/cargo-deny.tar.gz --directory /tmp \
+    && install --mode=0755 \
+      /tmp/cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny \
+      /usr/local/bin/cargo-deny \
+    && test "$(cargo-deny --version)" = "cargo-deny 0.20.2" \
+    && rm -rf \
+      /tmp/cargo-deny.tar.gz \
+      /tmp/cargo-deny-0.20.2-x86_64-unknown-linux-musl
+
 WORKDIR /src
-COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml Dockerfile ./
+COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml deny.toml Dockerfile ./
 COPY examples ./examples
 COPY src ./src
 COPY tests ./tests
+
+RUN cargo deny \
+      --locked \
+      --no-default-features \
+      --features pg18 \
+      check \
+      --show-stats \
+      advisories licenses bans sources
 
 RUN cc -std=c11 -Wall -Wextra -Werror \
       $(/opt/postgresql-18.4/bin/pg_config --cppflags) \
