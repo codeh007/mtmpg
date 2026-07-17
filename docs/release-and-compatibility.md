@@ -11,6 +11,7 @@
 - 正常构建仍保持 `authorized=false`，且不返回 `authn_id`。
 - 当前尚无从外部只读 config 和 JSON Web Key Set（JWKS）建立 verifier 的 production feature。
 - Runtime只接受PostgreSQL 18 major；当前build/test identity仍精确固定18.4，尚未独立构建或验证18.5，因此不得把现有artifact部署到18.5。
+- PG18.4的loader、allocator、callback和真实libpq `OAUTHBEARER`正负向smoke已通过；复验范围与限制见[PG18.4 runtime/OAuth证据](evidence/issue-116/pg18.4-runtime-oauth-smoke.md)。
 - 每个Cargo feature组合已生成并嵌入`pggomtm-build-identity/v1`规范JSON及其SHA-256；该build identity不包含source commit、`.so`或OCI digest，不能替代发布manifest。
 - `release-manifest.json` 与 release workflow 尚未实现。
 

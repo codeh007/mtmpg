@@ -30,6 +30,8 @@
 
 `pg18` 是当前 Cargo feature 名称，不代表所有 PostgreSQL 18 minor 都已获部署支持。Runtime major gate允许PG18 stable line，但只有 PostgreSQL 18.4 通过了当前源码、头文件与真实运行门禁。
 
+PG18.4的loader、allocator、callback及真实libpq `OAUTHBEARER`正负向smoke记录在[Issue #116 PG18.4验证证据](docs/evidence/issue-116/pg18.4-runtime-oauth-smoke.md)。该证据不得外推为PG18.5部署批准。
+
 每个 Cargo feature 组合都会生成规范的 `pggomtm-build-identity/v1` JSON及其 SHA-256，并把两者嵌入对应module。Identity固定Rust、pgrx、JOSE、PostgreSQL source/header/runtime base、target、architecture与libc，可用于比较build变体；它不包含source commit、最终`.so`或OCI digest，因此不是发布用`release-manifest.json`。
 
 ## 从仓库根目录构建和测试
