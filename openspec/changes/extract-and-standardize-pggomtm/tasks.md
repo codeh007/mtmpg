@@ -12,7 +12,7 @@
 - [x] 2.3 配置Dependabot只创建Cargo与GitHub Actions更新PR，禁止native认证依赖、Rust patch或PostgreSQL minor自动合并
 - [x] 2.4 收紧GitHub Actions为批准来源和full-SHA pin，保持默认workflow token只读，设置合并后删分支与批准的merge策略，并记录private套餐无法启用branch protection/rulesets的真实限制
 - [x] 2.5 检查仓库描述、topics、issue/security/release设置与私有可见性，保持private默认且不擅自升级套餐或公开package
-- [ ] 2.6 审查当前本地`main`领先`origin/main`且功能分支已删除的状态，从精确已审查commit非force push远端`issue-116-extract-pggomtm`功能ref，确认remote commit一致并保持`origin/main`不变，为远端CI和prerelease建立可审计source identity
+- [x] 2.6 审查当前本地`main`领先`origin/main`且功能分支已删除的状态，从精确已审查commit非force push远端`issue-116-extract-pggomtm`功能ref，确认remote commit一致并保持`origin/main`不变，为远端CI和prerelease建立可审计source identity
 
 ## 3. 官方OAuth ABI与pgrx边界
 
