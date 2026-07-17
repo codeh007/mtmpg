@@ -26,7 +26,7 @@ Agent 必须按当前任务范围核对现有契约：
 4. 阅读相关 Rust、C、SQL 测试和既有 evidence。
 5. 明确当前行为与未来目标，不能把未完成的 OpenSpec task 写成现有能力。
 
-当前无 gate 最终制品已从外部只读config/public JWKS建立snapshot并执行正式离线验签，database token actor/claims/signature矩阵已经通过；closed profile-role与forbidden-role门禁已取得[远端CI证据](docs/evidence/issue-116/native-ci-bootstrap.md)，两类actor、三个profile的allocator、`system_user`与identity往返也已取得[真实libpq证据](docs/evidence/issue-116/production-identity-roundtrip.md)。脱敏reason、无gate制品扫描与发布门禁仍未完成。它不是 production-ready，也没有稳定发布版或已发布开放容器计划（OCI）摘要。
+当前无 gate 最终制品已从外部只读config/public JWKS建立snapshot并执行正式离线验签，database token actor/claims/signature矩阵已经通过；closed profile-role与forbidden-role门禁已取得[远端CI证据](docs/evidence/issue-116/native-ci-bootstrap.md)，allocator/identity往返已取得[真实libpq证据](docs/evidence/issue-116/production-identity-roundtrip.md)，稳定reason与日志脱敏也已取得[远端可观察性证据](docs/evidence/issue-116/authentication-failure-observability.md)。无gate制品扫描与发布门禁仍未完成。它不是 production-ready，也没有稳定发布版或已发布开放容器计划（OCI）摘要。
 
 ## 保持完整 pgrx 与官方 OAuth 边界
 

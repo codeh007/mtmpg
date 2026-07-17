@@ -37,7 +37,7 @@ PG18.4的loader、allocator、callback及真实libpq `OAUTHBEARER`正负向smoke
 
 每个 Cargo feature 组合都会生成规范的 `pggomtm-build-identity/v1` JSON及其 SHA-256，并把两者嵌入对应module。Identity固定Rust、pgrx、JOSE、PostgreSQL source/header/runtime base、target、architecture与libc，可用于比较build变体；它不包含source commit、最终`.so`或OCI digest，因此不是发布用`release-manifest.json`。
 
-正式validator只允许读取[固定路径下的版本化runtime配置](docs/runtime-configuration.md)。当前已实现每个新backend的只读config/public JWKS加载、严格校验、同文件系统原子替换布局、独立snapshot持有与shutdown释放；后续backend读取新snapshot，既有backend不reload。正式validate callback已经接入snapshot并通过真实PG18.4 valid/tampered token smoke，以及OAuth client/API-key actor、三种profile、authority、ID、time、algorithm、audience/scope和signature矩阵。Closed profile-role与forbidden-role门禁已经取得[远端CI证据](docs/evidence/issue-116/native-ci-bootstrap.md)，两类actor、三个profile的PostgreSQL allocator、`system_user`与identity往返也已取得[真实libpq证据](docs/evidence/issue-116/production-identity-roundtrip.md)。脱敏失败reason仍是后续门禁。
+正式validator只允许读取[固定路径下的版本化runtime配置](docs/runtime-configuration.md)。当前已实现每个新backend的只读config/public JWKS加载、严格校验、同文件系统原子替换布局、独立snapshot持有与shutdown释放；后续backend读取新snapshot，既有backend不reload。正式validate callback已经接入snapshot并通过真实PG18.4 valid/tampered token smoke，以及OAuth client/API-key actor、三种profile、authority、ID、time、algorithm、audience/scope和signature矩阵。Closed profile-role与forbidden-role门禁已经取得[远端CI证据](docs/evidence/issue-116/native-ci-bootstrap.md)，allocator/identity往返已取得[真实libpq证据](docs/evidence/issue-116/production-identity-roundtrip.md)，稳定reason与日志脱敏也已取得[远端可观察性证据](docs/evidence/issue-116/authentication-failure-observability.md)。无gate module级artifact扫描仍是后续门禁。
 
 ## 通过GitHub Actions构建和测试
 
