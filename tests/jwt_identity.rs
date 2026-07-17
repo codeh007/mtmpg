@@ -7,7 +7,7 @@ use p256::ecdsa::{Signature, SigningKey};
 use pggomtm::database_auth::{
     AuthMethod, AuthenticatedActor, AuthenticatedIdentity, DatabaseProfile, DatabaseTokenClaims,
     DatabaseTokenPolicy, DatabaseTokenVerifier, JwtValidationError, MAX_AUTHN_ID_BYTES,
-    decode_authn_id, decode_system_user,
+    MAX_TOKEN_TTL_SECONDS, MIN_TOKEN_TTL_SECONDS, decode_authn_id, decode_system_user,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -76,6 +76,14 @@ fn valid_oauth_claims() -> DatabaseTokenClaims {
     }
 }
 
+fn valid_api_key_claims() -> DatabaseTokenClaims {
+    let mut claims = valid_oauth_claims();
+    claims.auth_method = AuthMethod::ApiKey;
+    claims.client_id = None;
+    claims.credential_id = Some("crd_01J00000000000000000000000".into());
+    claims
+}
+
 fn sign_payload(payload: impl Serialize, kid: &str, key: &SigningKey) -> String {
     let mut token = Token::compact((), payload);
     *token.header_mut().key_id() = Some(kid.into());
@@ -129,10 +137,7 @@ fn valid_es256_oauth_token_round_trips_versioned_identity() {
 fn valid_api_key_token_preserves_credential_attribution() {
     let key = signing_key();
     let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
-    let mut claims = valid_oauth_claims();
-    claims.auth_method = AuthMethod::ApiKey;
-    claims.client_id = None;
-    claims.credential_id = Some("crd_01J00000000000000000000000".into());
+    let claims = valid_api_key_claims();
     let token = sign_payload(claims.clone(), KID, &key);
 
     let verified = verifier
@@ -144,6 +149,195 @@ fn valid_api_key_token_preserves_credential_attribution() {
         AuthenticatedActor::ApiKeyCredential("crd_01J00000000000000000000000".into())
     );
     assert_eq!(verified.identity.auth_method, AuthMethod::ApiKey);
+}
+
+#[test]
+fn every_actor_profile_and_ttl_boundary_combination_is_valid() {
+    let key = signing_key();
+    let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
+
+    for (profile_index, profile) in [
+        DatabaseProfile::Ordinary,
+        DatabaseProfile::BusinessAdmin,
+        DatabaseProfile::DatabaseDeveloper,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for (method_index, method) in [AuthMethod::OAuth, AuthMethod::ApiKey]
+            .into_iter()
+            .enumerate()
+        {
+            let mut claims = match method {
+                AuthMethod::OAuth => valid_oauth_claims(),
+                AuthMethod::ApiKey => valid_api_key_claims(),
+            };
+            claims.db_profile = profile;
+            claims.db_role = profile.database_role().into();
+            claims.authority_version = u64::try_from(profile_index * 2 + method_index + 1)
+                .expect("small authority version");
+            claims.issued_at = NOW;
+            claims.expires_at = NOW
+                + if method_index == 0 {
+                    MIN_TOKEN_TTL_SECONDS
+                } else {
+                    MAX_TOKEN_TTL_SECONDS
+                };
+            let token = sign_payload(claims.clone(), KID, &key);
+
+            let verified = verifier
+                .verify(&token, profile.database_role(), NOW)
+                .expect("closed actor/profile combination must verify");
+            assert_eq!(verified.claims, claims);
+            assert_eq!(verified.identity.profile, profile);
+            assert_eq!(
+                verified.identity.authority_version,
+                claims.authority_version
+            );
+            assert!(matches!(
+                (method, verified.identity.actor),
+                (AuthMethod::OAuth, AuthenticatedActor::OAuthClient(_))
+                    | (AuthMethod::ApiKey, AuthenticatedActor::ApiKeyCredential(_))
+            ));
+        }
+    }
+}
+
+#[test]
+fn actor_authority_profile_role_and_id_matrix_fails_closed() {
+    let key = signing_key();
+    let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
+    let base = valid_oauth_claims();
+    let expected_role = base.db_profile.database_role();
+
+    let mut no_actor = base.clone();
+    no_actor.client_id = None;
+
+    let mut both_actors = base.clone();
+    both_actors.credential_id = Some("crd_01J00000000000000000000000".into());
+
+    let mut oauth_with_credential = base.clone();
+    oauth_with_credential.client_id = None;
+    oauth_with_credential.credential_id = Some("crd_01J00000000000000000000000".into());
+
+    let mut api_key_with_client = base.clone();
+    api_key_with_client.auth_method = AuthMethod::ApiKey;
+
+    let mut zero_authority = base.clone();
+    zero_authority.authority_version = 0;
+
+    let mut profile_role_mismatch = base.clone();
+    profile_role_mismatch.db_role = DatabaseProfile::BusinessAdmin.database_role().into();
+
+    for claims in [
+        no_actor,
+        both_actors,
+        oauth_with_credential,
+        api_key_with_client,
+        zero_authority,
+        profile_role_mismatch,
+    ] {
+        let token = sign_payload(claims, KID, &key);
+        assert_eq!(
+            verifier.verify(&token, expected_role, NOW),
+            Err(JwtValidationError::InvalidClaims)
+        );
+    }
+
+    for (field, value) in [
+        ("auth_method", json!("service")),
+        ("db_profile", json!("cluster-admin")),
+    ] {
+        let mut claims = serde_json::to_value(base.clone()).expect("claims JSON");
+        claims
+            .as_object_mut()
+            .expect("claims object")
+            .insert(field.into(), value);
+        let token = sign_payload(claims, KID, &key);
+        assert_eq!(
+            verifier.verify(&token, expected_role, NOW),
+            Err(JwtValidationError::InvalidToken),
+            "unknown {field} must fail closed"
+        );
+    }
+
+    let maximum_id = "x".repeat(64);
+    let mut boundary = base.clone();
+    boundary.subject = maximum_id.clone();
+    boundary.token_id = maximum_id.clone();
+    boundary.delegation_id = maximum_id.clone();
+    boundary.client_id = Some(maximum_id.clone());
+    let token = sign_payload(boundary, KID, &key);
+    verifier
+        .verify(&token, expected_role, NOW)
+        .expect("64-byte IDs are inside the contract boundary");
+
+    let invalid_ids = [
+        String::new(),
+        "contains:delimiter".into(),
+        "含有非ASCII".into(),
+        "x".repeat(65),
+    ];
+    for invalid_id in invalid_ids {
+        for (field, expected) in [
+            ("sub", JwtValidationError::InvalidIdentity),
+            ("jti", JwtValidationError::InvalidClaims),
+            ("delegation_id", JwtValidationError::InvalidIdentity),
+            ("client_id", JwtValidationError::InvalidIdentity),
+        ] {
+            let mut claims = serde_json::to_value(base.clone()).expect("OAuth claims JSON");
+            claims
+                .as_object_mut()
+                .expect("OAuth claims object")
+                .insert(field.into(), json!(invalid_id.clone()));
+            let token = sign_payload(claims, KID, &key);
+            assert_eq!(
+                verifier.verify(&token, expected_role, NOW),
+                Err(expected),
+                "field {field} must reject ID {invalid_id:?}"
+            );
+        }
+
+        let mut claims =
+            serde_json::to_value(valid_api_key_claims()).expect("API-key-derived claims JSON");
+        claims
+            .as_object_mut()
+            .expect("API-key-derived claims object")
+            .insert("credential_id".into(), json!(invalid_id.clone()));
+        let token = sign_payload(claims, KID, &key);
+        assert_eq!(
+            verifier.verify(&token, expected_role, NOW),
+            Err(JwtValidationError::InvalidIdentity),
+            "credential_id must reject ID {invalid_id:?}"
+        );
+    }
+}
+
+#[test]
+fn actor_schema_rejects_explicit_null_for_the_unselected_actor() {
+    let key = signing_key();
+    let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
+    let expected_role = DatabaseProfile::Ordinary.database_role();
+
+    let mut oauth = serde_json::to_value(valid_oauth_claims()).expect("OAuth claims JSON");
+    oauth
+        .as_object_mut()
+        .expect("OAuth claims object")
+        .insert("credential_id".into(), Value::Null);
+
+    let mut api_key = serde_json::to_value(valid_api_key_claims()).expect("API key claims JSON");
+    api_key
+        .as_object_mut()
+        .expect("API key claims object")
+        .insert("client_id".into(), Value::Null);
+
+    for claims in [oauth, api_key] {
+        let token = sign_payload(claims, KID, &key);
+        assert_eq!(
+            verifier.verify(&token, expected_role, NOW),
+            Err(JwtValidationError::InvalidToken)
+        );
+    }
 }
 
 #[test]

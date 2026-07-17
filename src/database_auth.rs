@@ -214,10 +214,25 @@ pub struct DatabaseTokenClaims {
     pub authority_version: u64,
     pub db_profile: DatabaseProfile,
     pub db_role: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_actor_id"
+    )]
     pub client_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_actor_id"
+    )]
     pub credential_id: Option<String>,
+}
+
+fn deserialize_present_actor_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    String::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
