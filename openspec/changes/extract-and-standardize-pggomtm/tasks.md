@@ -39,12 +39,12 @@
 
 ## 6. JWT、role与identity接入正式callback
 
-执行顺序调整：6.3候选与7.1 workflow已经分别形成可审查commit，并由精确远端HEAD的Actions成功run完成验证；继续执行6.4至6.6。
+执行顺序调整：6.3候选、7.1 workflow与6.4 production identity矩阵均已由精确远端HEAD的Actions成功run完成验证；继续执行6.5至6.6。
 
 - [x] 6.1 把已验证的ES256/JWKS verifier接入无gate feature的正式validate callback，保持固定issuer/audience/database scope、30至300秒TTL和deny-unknown完整claims契约
 - [x] 6.2 覆盖OAuth client与API-key credential actor二选一、authority version、profile、role、ID字符/长度、time、algorithm、audience/scope和tampered signature正负矩阵
 - [x] 6.3 为已存在的closed ordinary/business-admin/database-developer profile-role映射与startup requested role精确匹配补齐显式unit、config扩权和真实PostgreSQL forbidden-role门禁，拒绝service/migration/cluster/未知role；只有对应远端Actions run通过后才完成，本任务没有发现实现缺口时不得改production Rust逻辑
-- [ ] 6.4 以无gate production callback和真实libpq OAuth backend证明PostgreSQL allocator与`authn_id -> system_user -> decoded identity`无歧义往返，覆盖OAuth client/API-key actor、三个profile及超长/非法/未知版本拒绝；仅在门禁发现真实缺口时修改实现
+- [x] 6.4 以无gate production callback和真实libpq OAuth backend证明PostgreSQL allocator与`authn_id -> system_user -> decoded identity`无歧义往返，覆盖OAuth client/API-key actor、三个profile及超长/非法/未知版本拒绝；仅在门禁发现真实缺口时修改实现
 - [ ] 6.5 明确认证失败reason-code的稳定字符串、服务端日志级别与客户端可见性，验证token拒绝、startup错误、panic和PostgreSQL ERROR只产生脱敏类别且不包含JWT、JWKS内容、connection string或完整内部堆栈
 - [ ] 6.6 由远端Actions构建无`abi-gate`、`abi-runtime-gate`、`pgx-oauth-gate`的production artifact，扫描排除内置测试JWKS/key/token、probe symbol/string和测试module，并把本任务限定为module级artifact gate而不重复后续CI/发布供应链门禁
 

@@ -4,7 +4,7 @@
 
 独立审查曾证明binding生成存在critical provenance缺口：`bindings.to_string()`被校验后，`write_to_file()`可再次通过bindgen默认formatter读取`RUSTFMT`或`PATH/rustfmt`并改写最终文件。当前实现已经禁用外部formatter、单次materialize并直接写入被校验的相同字节，且精确远端commit已经通过GitHub Actions；这些结果仍只完成当前native门禁，不能替代后续cold、release provenance或gomtmui consumer证据。
 
-正式无gate callback当前已经从外部只读config/public JWKS建立每backend snapshot并执行严格ES256、actor、claims、profile-role和requested-role验证。任务6.3只补充forbidden-role、配置扩权和真实PostgreSQL probe，没有修改production Rust逻辑，并已由远端run `29591036227`验证；任务6.4至6.6仍需完成production `system_user`往返、稳定脱敏reason和最终无gate artifact门禁。
+正式无gate callback当前已经从外部只读config/public JWKS建立每backend snapshot并执行严格ES256、actor、claims、profile-role和requested-role验证。任务6.3只补充forbidden-role、配置扩权和真实PostgreSQL probe，没有修改production Rust逻辑，并已由远端run `29591036227`验证；任务6.4新增无gate真实libpq actor/profile矩阵，也未修改production Rust，并已由远端run `29594695377`验证。任务6.5至6.6仍需完成稳定脱敏reason和最终无gate artifact门禁。
 
 原生 PostgreSQL、Rust、pgrx与多阶段Docker build在本机首次编译耗时较长，且中断的终端输出难以形成持久证据。根`Dockerfile`继续定义唯一build graph，但GitHub Actions必须成为执行该graph、保存日志并判定任务完成的唯一证据权威。本地命令只保留为可选快速诊断，不能完成OpenSpec task、consumer gate或发布门禁。
 
