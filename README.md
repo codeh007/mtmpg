@@ -34,6 +34,8 @@ PG18.4的loader、allocator、callback及真实libpq `OAUTHBEARER`正负向smoke
 
 每个 Cargo feature 组合都会生成规范的 `pggomtm-build-identity/v1` JSON及其 SHA-256，并把两者嵌入对应module。Identity固定Rust、pgrx、JOSE、PostgreSQL source/header/runtime base、target、architecture与libc，可用于比较build变体；它不包含source commit、最终`.so`或OCI digest，因此不是发布用`release-manifest.json`。
 
+正式validator只允许读取[固定路径下的版本化runtime配置](docs/runtime-configuration.md)。当前只定义了该部署契约，配置读取和无gate callback尚未实现，因此默认artifact继续拒绝所有token。
+
 ## 从仓库根目录构建和测试
 
 `Dockerfile` 是当前 clean build 与原型门禁的权威入口。以下命令构建 Linux amd64 本地候选镜像，并重新运行 Rust、C、真实 PostgreSQL runtime 与最终制品隔离检查：
