@@ -8,8 +8,12 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use sha2::{Digest, Sha256};
+
 const APPROVED_MAGIC: u32 = 0x2025_0220;
 const ATTACK_MAGIC: u32 = 0x0bad_cafe;
+const APPROVED_BINDINGS_SHA256: &str =
+    "b6f8bf810c467f74a0e43f9019f00cfd517cc881c9b606175818ca1b17204beb";
 const BINDINGS_FILE: &str = "pggomtm_oauth_bindings.rs";
 const TARGET: &str = "x86_64-unknown-linux-gnu";
 const AMBIENT_CLANG_ENV: [&str; 11] = [
@@ -273,6 +277,11 @@ fn real_generator_rejects_unapproved_provenance_inputs() {
     assert_generated_from_approved_header(&success, "approved official header");
     let expected_bindings = fs::read(success.out_dir.join(BINDINGS_FILE))
         .expect("read approved final OAuth bindings bytes");
+    assert_eq!(
+        bindings_sha256(&expected_bindings),
+        APPROVED_BINDINGS_SHA256,
+        "approved generator final OUT_DIR bytes changed"
+    );
 
     let rustfmt_probe = fixture.path("rustfmt-env-probe/rustfmt");
     let rustfmt_marker = fixture.path("rustfmt-env-probe-executed");
@@ -316,6 +325,12 @@ fn real_generator_rejects_unapproved_provenance_inputs() {
     );
 
     let stdout = String::from_utf8_lossy(&success.output.stdout);
+    assert!(
+        stdout.contains(&format!(
+            "cargo:rustc-env=PG_OAUTH_BINDINGS_SHA256={APPROVED_BINDINGS_SHA256}"
+        )),
+        "approved build omitted the final bindings digest: {stdout}"
+    );
     for variable in rerun_environment_names() {
         assert!(
             stdout.contains(&format!("cargo:rerun-if-env-changed={variable}")),
@@ -438,6 +453,10 @@ fn generated_summary(out_dir: &Path) -> String {
     fs::read_to_string(out_dir.join(BINDINGS_FILE))
         .map(|generated| generated.lines().take(4).collect::<Vec<_>>().join(" | "))
         .unwrap_or_else(|_| "no bindings".to_owned())
+}
+
+fn bindings_sha256(bindings: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bindings))
 }
 
 fn current_build_script() -> PathBuf {

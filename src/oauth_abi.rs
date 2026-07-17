@@ -13,3 +13,4 @@ pub use generated::{
 };
 
 pub const PG_OAUTH_HEADER_SHA256: &str = env!("PG_OAUTH_HEADER_SHA256");
+pub const PG_OAUTH_BINDINGS_SHA256: &str = env!("PG_OAUTH_BINDINGS_SHA256");

@@ -33,6 +33,15 @@ const CALLBACK_TYPES: [&str; 4] = [
     "ValidatorValidateCB",
     "OAuthValidatorModuleInit",
 ];
+const EXPECTED_COMPACT_ABI_FRAGMENTS: [&str; 7] = [
+    "pubstructValidatorModuleState{pubsversion:::std::os::raw::c_int,pubprivate_data:*mut::std::os::raw::c_void,}",
+    "pubstructValidatorModuleResult{pubauthorized:bool,pubauthn_id:*mut::std::os::raw::c_char,}",
+    "pubtypeValidatorStartupCB=::std::option::Option<unsafeextern\"C-unwind\"fn(state:*mutValidatorModuleState)>;",
+    "pubtypeValidatorShutdownCB=::std::option::Option<unsafeextern\"C-unwind\"fn(state:*mutValidatorModuleState)>;",
+    "pubtypeValidatorValidateCB=::std::option::Option<unsafeextern\"C-unwind\"fn(state:*constValidatorModuleState,token:*const::std::os::raw::c_char,role:*const::std::os::raw::c_char,result:*mutValidatorModuleResult)->bool>;",
+    "pubstructOAuthValidatorCallbacks{pubmagic:uint32,pubstartup_cb:ValidatorStartupCB,pubshutdown_cb:ValidatorShutdownCB,pubvalidate_cb:ValidatorValidateCB,}",
+    "pubtypeOAuthValidatorModuleInit=::std::option::Option<unsafeextern\"C-unwind\"fn()->*constOAuthValidatorCallbacks>;",
+];
 const AMBIENT_CLANG_ENV: [&str; 11] = [
     "CCC_OVERRIDE_OPTIONS",
     "CLANG_PATH",
@@ -141,11 +150,21 @@ fn generate_bindings() -> BuildResult<()> {
         ));
     }
 
-    let out_dir = output_dir()?;
-    fs::write(out_dir.join(BINDINGS_FILE), generated.as_bytes())
+    let bindings_path = output_dir()?.join(BINDINGS_FILE);
+    fs::write(&bindings_path, generated.as_bytes())
         .map_err(|_| build_error("generated OAuth bindings could not be written to OUT_DIR"))?;
+    let written = fs::read(&bindings_path)
+        .map_err(|_| build_error("final OAuth bindings could not be read from OUT_DIR"))?;
+    if written != generated.as_bytes() {
+        return fail("final OUT_DIR bindings differ from the validated materialized bytes");
+    }
+    let written_sha256 = format!("{:x}", Sha256::digest(&written));
+    if written_sha256 != bindings_sha256 {
+        return fail("final OUT_DIR bindings digest differs from the validated bindings digest");
+    }
 
     println!("cargo:rustc-env=PG_OAUTH_HEADER_SHA256={header_sha256}");
+    println!("cargo:rustc-env=PG_OAUTH_BINDINGS_SHA256={bindings_sha256}");
     Ok(())
 }
 
@@ -336,6 +355,11 @@ fn validate_generated_bindings(generated: &str) -> BuildResult<()> {
     }
     if !compact.contains("pubmagic:uint32,") {
         return fail("bindgen did not preserve PostgreSQL's uint32 callback magic field");
+    }
+    for fragment in EXPECTED_COMPACT_ABI_FRAGMENTS {
+        if !compact.contains(fragment) {
+            return fail("bindgen output does not match the approved OAuth ABI field signatures");
+        }
     }
 
     for callback in CALLBACK_TYPES {

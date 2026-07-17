@@ -12,9 +12,9 @@ pub mod database_auth;
 pub mod oauth_abi;
 
 pub use oauth_abi::{
-    OAuthValidatorCallbacks, OAuthValidatorModuleInit, PG_OAUTH_HEADER_SHA256,
-    PG_OAUTH_VALIDATOR_MAGIC, ValidatorModuleResult, ValidatorModuleState, ValidatorShutdownCB,
-    ValidatorStartupCB, ValidatorValidateCB,
+    OAuthValidatorCallbacks, OAuthValidatorModuleInit, PG_OAUTH_BINDINGS_SHA256,
+    PG_OAUTH_HEADER_SHA256, PG_OAUTH_VALIDATOR_MAGIC, ValidatorModuleResult, ValidatorModuleState,
+    ValidatorShutdownCB, ValidatorStartupCB, ValidatorValidateCB,
 };
 
 pub const PG18_VERSION_NUM: i32 = 180_004;
