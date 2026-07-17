@@ -262,7 +262,8 @@ RUN mkdir --mode=0700 /tmp/pggomtm-abi-pgdata \
     && /tmp/pggomtm_oauth_smoke_fixture \
       generate \
       /tmp/pggomtm-config-fixtures \
-    && chmod 0444 /tmp/pggomtm-config-fixtures/*.jwt \
+    && chown --recursive postgres:postgres /tmp/pggomtm-config-fixtures \
+    && chmod 0400 /tmp/pggomtm-config-fixtures/*.jwt \
     && gosu postgres psql \
       --host=/tmp \
       --username=postgres \
