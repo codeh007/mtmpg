@@ -393,14 +393,18 @@ fn assert_generated_from_approved_header(run: &GeneratorRun, scenario: &str) {
     );
     let generated =
         fs::read_to_string(run.out_dir.join(BINDINGS_FILE)).expect("read generated OAuth bindings");
+    let compact = generated
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
     assert!(
-        generated.contains(&format!(
-            "pub const PG_OAUTH_VALIDATOR_MAGIC: u32 = {APPROVED_MAGIC};"
+        compact.contains(&format!(
+            "pubconstPG_OAUTH_VALIDATOR_MAGIC:u32={APPROVED_MAGIC};"
         )),
         "{scenario} did not generate the approved header magic: {generated}"
     );
     assert!(
-        !generated.contains(&ATTACK_MAGIC.to_string()),
+        !compact.contains(&ATTACK_MAGIC.to_string()),
         "{scenario} accepted the shadow header instead of the hashed official header"
     );
 }

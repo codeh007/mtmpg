@@ -12,6 +12,8 @@ use sha2::{Digest, Sha256};
 const APPROVED_POSTGRESQL_VERSION: &str = "PostgreSQL 18.4";
 const APPROVED_OAUTH_HEADER_SHA256: &str =
     "be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bcf";
+const APPROVED_OAUTH_BINDINGS_SHA256: &str =
+    "b6f8bf810c467f74a0e43f9019f00cfd517cc881c9b606175818ca1b17204beb";
 const BINDINGS_FILE: &str = "pggomtm_oauth_bindings.rs";
 const CALLBACK_ABI_PATTERN: &str =
     "^(ValidatorStartupCB|ValidatorShutdownCB|ValidatorValidateCB|OAuthValidatorModuleInit)$";
@@ -125,16 +127,22 @@ fn generate_bindings() -> BuildResult<()> {
         .allowlist_recursively(false)
         .generate_comments(false)
         .layout_tests(false)
+        .formatter(bindgen::Formatter::None)
         .override_abi(bindgen::Abi::CUnwind, CALLBACK_ABI_PATTERN)
         .generate()
         .map_err(|_| build_error("bindgen rejected the approved PostgreSQL OAuth headers"))?;
 
     let generated = bindings.to_string();
     validate_generated_bindings(&generated)?;
+    let bindings_sha256 = format!("{:x}", Sha256::digest(generated.as_bytes()));
+    if bindings_sha256 != APPROVED_OAUTH_BINDINGS_SHA256 {
+        return fail(format!(
+            "generated OAuth bindings SHA-256 is not approved: {bindings_sha256}"
+        ));
+    }
 
     let out_dir = output_dir()?;
-    bindings
-        .write_to_file(out_dir.join(BINDINGS_FILE))
+    fs::write(out_dir.join(BINDINGS_FILE), generated.as_bytes())
         .map_err(|_| build_error("generated OAuth bindings could not be written to OUT_DIR"))?;
 
     println!("cargo:rustc-env=PG_OAUTH_HEADER_SHA256={header_sha256}");
@@ -294,47 +302,50 @@ fn approved_utf8_path<'a>(path: &'a Path, error: &str) -> BuildResult<&'a str> {
 }
 
 fn validate_generated_bindings(generated: &str) -> BuildResult<()> {
+    let compact = generated
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
     let expected = EXPECTED_PUBLIC_ITEMS.into_iter().collect::<BTreeSet<_>>();
     let mut actual = BTreeSet::new();
 
-    for line in generated.lines() {
-        let item = ["pub const ", "pub struct ", "pub type "]
-            .into_iter()
-            .find_map(|prefix| public_item_name(line, prefix));
-        if let Some(item) = item {
+    for prefix in ["pubconst", "pubstruct", "pubtype"] {
+        let mut remainder = compact.as_str();
+        while let Some(start) = remainder.find(prefix) {
+            remainder = &remainder[start + prefix.len()..];
+            let item = public_item_name(remainder);
             if !actual.insert(item) {
                 return fail("bindgen emitted a duplicate public OAuth ABI item");
             }
-        } else if line.starts_with("pub ") {
-            return fail("bindgen expanded the public OAuth ABI outside the approved item kinds");
-        }
-
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("pub fn ") || trimmed.starts_with("pub static ") {
-            return fail("bindgen emitted an unapproved OAuth function or static symbol");
         }
     }
 
     if actual != expected {
         return fail("bindgen output does not exactly match the approved OAuth ABI allowlist");
     }
-    if generated.contains("_PG_oauth_validator_module_init") {
+    if compact.contains("_PG_oauth_validator_module_init") {
         return fail(
             "bindgen emitted the runtime init symbol instead of only its approved typedef",
         );
     }
-    if !generated.contains("pub magic: uint32,") {
+    if compact.contains("pubfn") || compact.contains("pubstatic") {
+        return fail("bindgen emitted an unapproved OAuth function or static symbol");
+    }
+    if !compact.contains("pubconstPG_OAUTH_VALIDATOR_MAGIC:u32=539296288;") {
+        return fail("bindgen did not preserve the approved PostgreSQL OAuth magic value");
+    }
+    if !compact.contains("pubmagic:uint32,") {
         return fail("bindgen did not preserve PostgreSQL's uint32 callback magic field");
     }
 
     for callback in CALLBACK_TYPES {
-        let marker = format!("pub type {callback}");
-        let definition = generated
+        let marker = format!("pubtype{callback}");
+        let definition = compact
             .split_once(&marker)
             .and_then(|(_, remainder)| remainder.split_once(';'))
             .map(|(definition, _)| definition)
             .ok_or_else(|| build_error("bindgen omitted an approved callback typedef"))?;
-        if !definition.contains("extern \"C-unwind\" fn") {
+        if !definition.contains("extern\"C-unwind\"fn") {
             return fail("bindgen callback typedef is not using the required C-unwind ABI");
         }
     }
@@ -342,12 +353,11 @@ fn validate_generated_bindings(generated: &str) -> BuildResult<()> {
     Ok(())
 }
 
-fn public_item_name<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
-    let remainder = line.strip_prefix(prefix)?;
+fn public_item_name(remainder: &str) -> &str {
     let end = remainder
-        .find([' ', ':', '=', '{', ';'])
+        .find([':', '=', '{', ';'])
         .unwrap_or(remainder.len());
-    Some(&remainder[..end])
+    &remainder[..end]
 }
 
 fn fail<T>(message: impl Into<String>) -> BuildResult<T> {
