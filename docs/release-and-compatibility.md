@@ -21,6 +21,12 @@
 
 正式runtime必须遵循[固定路径与版本化配置契约](runtime-configuration.md)。Release不得通过环境变量、PostgreSQL GUC或启动参数增加第二个配置入口。
 
+## 远端CI证据契约
+
+根`Dockerfile`是唯一build graph authority，`.github/workflows/native-ci.yml`是日常远端执行入口。只有关联精确远端commit的成功GitHub Actions run可以完成OpenSpec task、gomtmui consumer gate或发布门禁；本地`cargo`、`docker build`、image tag和终端日志只用于诊断。
+
+Feature push与PR lane使用BuildKit/GitHub Actions cache、同ref并发取消、read-only token且不登录GHCR。无缓存cold authority和受信release lane在后续任务中单独建立；缓存run不得冒充cold或发布证据。
+
 ## 三种版本不得混用
 
 发布同时携带三个独立版本域。每个版本只描述自己的契约：

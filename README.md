@@ -38,32 +38,38 @@ PG18.4的loader、allocator、callback及真实libpq `OAUTHBEARER`正负向smoke
 
 正式validator只允许读取[固定路径下的版本化runtime配置](docs/runtime-configuration.md)。当前已实现每个新backend的只读config/public JWKS加载、严格校验、同文件系统原子替换布局、独立snapshot持有与shutdown释放；后续backend读取新snapshot，既有backend不reload。正式validate callback已经接入snapshot并通过真实PG18.4 valid/tampered token smoke，以及OAuth client/API-key actor、三种profile、authority、ID、time、algorithm、audience/scope和signature矩阵。Closed profile-role实现已经存在；补充config扩权与service/migration/cluster/unknown role拒绝门禁的6.3候选仍需精确远端commit的GitHub Actions验证。Identity allocator完整往返与脱敏失败reason仍是后续门禁。
 
-## 从仓库根目录构建和测试
+## 通过GitHub Actions构建和测试
 
-`Dockerfile` 是当前 clean build 与原型门禁的权威入口。以下命令构建 Linux amd64 本地候选镜像，并重新运行 Rust、C、production静态/ELF离线能力、真实 PostgreSQL runtime 与最终制品隔离检查：
+根`Dockerfile`是Rust、C、production静态/ELF离线能力、真实PostgreSQL runtime与最终制品隔离检查的唯一build graph。`.github/workflows/native-ci.yml`从精确远端commit执行该graph；只有成功的`Native CI` run可以完成OpenSpec task、gomtmui consumer gate或发布门禁。本地命令只用于快速诊断。
+
+首次workflow通过`issue-116-extract-pggomtm`分支push或面向`main`的PR启动。Push后使用以下命令定位并等待对应run：
+
+```bash
+gh run list \
+  --repo codeh007/mtmpg \
+  --workflow native-ci.yml \
+  --branch issue-116-extract-pggomtm \
+  --limit 5
+gh run watch <run-id> --repo codeh007/mtmpg --exit-status
+gh run view <run-id> --repo codeh007/mtmpg --log-failed
+```
+
+常规push/PR使用内容寻址的GitHub Actions cache和同ref并发取消，不登录GHCR、不读取发布secret、不上传正式制品。后续cold authority mode才负责无缓存复验；普通开发run不得默认禁用缓存。
+
+### 可选的本地诊断
+
+需要定位Docker或runner差异时，可以构建本地诊断image。它不能替代远端run：
 
 ```bash
 DOCKER_BUILDKIT=1 docker build \
   --platform linux/amd64 \
-  --no-cache \
   --pull \
   --progress=plain \
-  --tag pggomtm-candidate:local \
+  --tag pggomtm-diagnostic:local \
   .
 ```
 
-以下命令额外构建只供测试的 `pgx-oauth-gate` target。不要部署该镜像或其中的 gate module：
-
-```bash
-DOCKER_BUILDKIT=1 docker build \
-  --platform linux/amd64 \
-  --no-cache \
-  --pull \
-  --progress=plain \
-  --target pgx-oauth-gate \
-  --tag pggomtm-pgx-oauth-gate:local \
-  .
-```
+需要单独定位测试gate时，追加`--target pgx-oauth-gate`并使用明显的diagnostic tag。不要部署该image或其中的gate module。
 
 构建阶段先在 `/src/target/release/libpggomtm.so` 生成无 gate module。最终镜像把它重命名并安装到 `/usr/lib/postgresql/18/lib/pggomtm.so`。该路径来自当前 `postgres:18.4-bookworm` 镜像；非容器环境必须以目标系统的 `pg_config --pkglibdir` 为准。
 
@@ -71,7 +77,7 @@ DOCKER_BUILDKIT=1 docker build \
 
 当前仓库没有生产支持的稳定制品。以下步骤只适用于与支持矩阵完全相同的隔离候选环境；它要求先按[运行时配置契约](docs/runtime-configuration.md)提供只读材料，并只用于验证当前正式callback的候选allow/deny行为：
 
-1. 确认本页构建命令已经生成 `pggomtm-candidate:local` final image。
+1. 确认对应远端commit的`Native CI`已经成功；若要执行本地安装演练，再从同一commit生成`pggomtm-diagnostic:local` final image。
 2. 停止整个候选 PostgreSQL 实例，确保没有 backend 已加载旧 `.so`。
 3. 从 final image 创建临时 container，并从当前 final 路径复制 `pggomtm.so`。
 4. 删除临时 container，验证目标 `pg_config` 报告 PostgreSQL 18.4，再把 module 安装到真实 `pkglibdir`。
@@ -92,7 +98,7 @@ cleanup_candidate() {
 }
 trap cleanup_candidate EXIT
 
-candidate_container="$(docker create pggomtm-candidate:local)"
+candidate_container="$(docker create pggomtm-diagnostic:local)"
 docker cp \
   "${candidate_container}:/usr/lib/postgresql/18/lib/pggomtm.so" \
   "$candidate_dir/pggomtm.so"

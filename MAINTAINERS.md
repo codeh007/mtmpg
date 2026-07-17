@@ -8,8 +8,9 @@
 
 - `Cargo.toml`、`Cargo.lock` 与 `rust-toolchain.toml` 定义单 crate 和 locked Rust 输入。
 - `src/` 是唯一实现，不在消费仓库、部署仓库或运维目录维护副本。
-- 根级 `Dockerfile` 是当前 clean build、测试 gate 与 final image 组装的唯一权威入口。
-- 构建和证据必须来自可识别 commit 的 clean checkout。
+- 根级 `Dockerfile` 是clean build、测试gate与final image组装的唯一build graph authority。
+- `.github/workflows/native-ci.yml`是执行该graph的远端CI authority；任务、consumer和发布证据必须来自可识别远端commit的clean checkout及成功Actions run。
+- 本地测试和image只用于诊断，不能替代远端run或发布身份。
 
 消费方只能使用经过验证的 artifact，不得复制源码后自行形成第二条构建链。
 
@@ -42,13 +43,14 @@
 任何候选制品对外提供前都需要可复验记录：
 
 - 精确 source commit 与 clean worktree 状态
+- GitHub Actions workflow、run ID、job结论与远端commit的一致性
 - Rust、Cargo dependencies、PostgreSQL source/header、runtime、target、架构和 libc 身份
 - Rustfmt、Clippy `-D warnings`、locked tests、C probe 与真实 PostgreSQL runtime 结果
 - `PG_MODULE_MAGIC`、`_PG_oauth_validator_module_init` 和动态链接检查
 - 无 gate 最终制品对测试 key、JWKS、token、probe 和 secret 的隔离扫描
 - 安装、回退、限制和消费方候选验证结果
 
-证据缺失或组合不匹配时停止交付。不要用本地 tag、可变文件名或未经验证的运行结果替代制品身份。
+证据缺失或组合不匹配时停止交付。不要用本地tag、可变文件名、终端输出或未经验证的运行结果替代远端CI与制品身份。
 
 ## 禁止的维护操作
 
