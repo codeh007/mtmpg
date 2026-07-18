@@ -69,8 +69,8 @@
 
 ## 8. 独立Stable发布与收尾
 
-- [ ] 8.1 将Cargo package version提升为首个stable SemVer并创建对应不可变Git tag，由同一release流程重新解析、完整测试、构建和发布独立stable制品
-- [ ] 8.2 发布`ghcr.io/codeh007/mtmpg:<stable>`、stable GitHub Release和标准供应链材料，只在全部成功后把`latest`更新为该stable digest
-- [ ] 8.3 复验stable version、source、manifest、Cargo.lock、resolved inputs、module/image digest、Release assets、SBOM、provenance、attestation与`latest`一致且没有覆盖prerelease
-- [ ] 8.4 同步确认gomtmui companion OpenSpec只按SemVer消费新image、没有专用native consumer harness或mtmpg release前置的跨仓E2E
+- [x] 8.1 将Cargo package version提升为首个stable SemVer并创建对应不可变Git tag，由同一release流程重新解析、完整测试、构建和发布独立stable制品
+- [x] 8.2 发布`ghcr.io/codeh007/mtmpg:<stable>`、stable GitHub Release和标准供应链材料，只在全部成功后把`latest`更新为该stable digest
+- [x] 8.3 复验stable version、source、manifest、Cargo.lock、resolved inputs、module/image digest、Release assets、SBOM、provenance、attestation与`latest`一致且没有覆盖prerelease
+- [x] 8.4 同步确认gomtmui companion OpenSpec只按SemVer消费新image、没有专用native consumer harness或mtmpg release前置的跨仓E2E
 - [ ] 8.5 运行全部远端领域、ABI、真实PG18、final-image、release与严格OpenSpec门禁，回填mtmpg #1和gomtmui #116/#117最终结果与已知限制
