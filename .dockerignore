@@ -11,6 +11,7 @@
 !rust-toolchain.toml
 !deny.toml
 !gitleaks.toml
+!LICENSE
 !scripts/
 !scripts/**
 !examples/

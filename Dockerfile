@@ -83,15 +83,18 @@ COPY scripts ./scripts
 
 RUN scripts/public-readiness install-gitleaks /usr/local/bin
 
-COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml deny.toml Dockerfile ./
+COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml deny.toml Dockerfile LICENSE ./
 COPY examples ./examples
 COPY src ./src
 COPY tests ./tests
 
 RUN shellcheck \
+      scripts/artifact-readiness \
       scripts/public-readiness \
+      tests/artifact_readiness_gate.sh \
       tests/public_readiness_gate.sh \
       tests/fixtures/public-readiness/fake-gh \
+    && tests/artifact_readiness_gate.sh \
     && tests/public_readiness_gate.sh /usr/local/bin/gitleaks \
     && PGGOMTM_GITLEAKS_BIN=/usr/local/bin/gitleaks \
       scripts/public-readiness scan-path /src
@@ -143,7 +146,19 @@ RUN cargo test --locked --no-default-features --features pg18 \
       '"features":["pg18"]' \
       target/release/libpggomtm.so \
     && nm -D target/release/libpggomtm.so \
-      | grep --quiet ' _PG_oauth_validator_module_init$'
+      | grep --quiet ' _PG_oauth_validator_module_init$' \
+    && scripts/artifact-readiness verify-elf \
+      target/release/libpggomtm.so \
+    && scripts/artifact-readiness create-build-manifest \
+      target/release/build \
+      target/release/libpggomtm.so \
+      LICENSE \
+      /tmp/pggomtm-build-manifest.json \
+    && scripts/artifact-readiness verify-build-manifest \
+      /tmp/pggomtm-build-manifest.json \
+      target/release/libpggomtm.so \
+      LICENSE \
+      target/release/build
 
 RUN cargo tree --locked --no-default-features --features pg18 \
       --edges normal \
@@ -493,21 +508,58 @@ RUN mkdir --mode=0700 /tmp/pggomtm-production-identity-pgdata \
       /usr/lib/postgresql/18/lib/pggomtm_identity_gate.so \
     && touch /tmp/pggomtm-production-identity-passed
 
-FROM postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296
+FROM postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296 AS runtime-base
 
-COPY --from=abi-runtime-gate /tmp/pggomtm-abi-runtime-gate-passed /tmp/pggomtm-abi-runtime-gate-passed
-COPY --from=pgx-oauth-gate /tmp/pggomtm-oauth-smoke-passed /tmp/pggomtm-oauth-smoke-passed
-COPY --from=production-identity-gate /tmp/pggomtm-production-identity-passed /tmp/pggomtm-production-identity-passed
-COPY --from=build /src/target/release/libpggomtm.so /usr/lib/postgresql/18/lib/pggomtm.so
+FROM build AS runtime-base-inventory
 
-RUN test -r /usr/lib/postgresql/18/lib/pggomtm.so \
-    && test -f /tmp/pggomtm-abi-runtime-gate-passed \
+RUN --mount=type=bind,from=runtime-base,source=/,target=/tmp/pggomtm-runtime-base-root,ro \
+    scripts/artifact-readiness snapshot-filesystem \
+      /tmp/pggomtm-runtime-base-root \
+      /tmp/pggomtm-artifact-base.tsv \
+    && test -s /tmp/pggomtm-artifact-base.tsv
+
+FROM runtime-base AS candidate-content
+
+COPY --from=build --chown=0:0 --chmod=0644 /src/target/release/libpggomtm.so /usr/lib/postgresql/18/lib/pggomtm.so
+COPY --from=build --chown=0:0 --chmod=0644 /src/LICENSE /usr/share/doc/pggomtm/LICENSE
+COPY --from=build --chown=0:0 --chmod=0644 /tmp/pggomtm-build-manifest.json /usr/share/doc/pggomtm/build-manifest.json
+
+FROM candidate-content AS candidate-runtime-gate
+
+RUN --mount=type=bind,from=build,source=/src/scripts/artifact-readiness,target=/tmp/pggomtm-artifact-readiness,ro \
+    /tmp/pggomtm-artifact-readiness verify-runtime / \
+    && touch /tmp/pggomtm-candidate-runtime-gate-passed
+
+FROM build AS candidate-artifact-gate
+
+RUN --mount=type=bind,from=runtime-base-inventory,source=/tmp/pggomtm-artifact-base.tsv,target=/tmp/pggomtm-artifact-base.tsv,ro \
+    --mount=type=bind,from=candidate-content,source=/,target=/tmp/pggomtm-candidate-root,ro \
+    --mount=type=bind,from=candidate-runtime-gate,source=/tmp/pggomtm-candidate-runtime-gate-passed,target=/tmp/pggomtm-candidate-runtime-gate-passed,ro \
+    --mount=type=bind,from=abi-runtime-gate,source=/tmp/pggomtm-abi-runtime-gate-passed,target=/tmp/pggomtm-abi-runtime-gate-passed,ro \
+    --mount=type=bind,from=pgx-oauth-gate,source=/tmp/pggomtm-oauth-smoke-passed,target=/tmp/pggomtm-oauth-smoke-passed,ro \
+    --mount=type=bind,from=production-identity-gate,source=/tmp/pggomtm-production-identity-passed,target=/tmp/pggomtm-production-identity-passed,ro \
+    test -f /tmp/pggomtm-abi-runtime-gate-passed \
     && test -f /tmp/pggomtm-oauth-smoke-passed \
     && test -f /tmp/pggomtm-production-identity-passed \
-    && test ! -e /usr/lib/postgresql/18/lib/pggomtm_abi_gate.so \
-    && test ! -e /usr/lib/postgresql/18/lib/pggomtm_abi_runtime_probe.so \
-    && test ! -e /usr/lib/postgresql/18/lib/pggomtm_config_gate.so \
-    && rm \
-      /tmp/pggomtm-abi-runtime-gate-passed \
-      /tmp/pggomtm-oauth-smoke-passed \
-      /tmp/pggomtm-production-identity-passed
+    && test -f /tmp/pggomtm-candidate-runtime-gate-passed \
+    && scripts/artifact-readiness snapshot-filesystem \
+      /tmp/pggomtm-candidate-root \
+      /tmp/pggomtm-artifact-candidate.tsv \
+    && scripts/artifact-readiness verify-filesystem \
+      /tmp/pggomtm-artifact-base.tsv \
+      /tmp/pggomtm-artifact-candidate.tsv \
+    && scripts/artifact-readiness verify-build-manifest \
+      /tmp/pggomtm-candidate-root/usr/share/doc/pggomtm/build-manifest.json \
+      /tmp/pggomtm-candidate-root/usr/lib/postgresql/18/lib/pggomtm.so \
+      /tmp/pggomtm-candidate-root/usr/share/doc/pggomtm/LICENSE \
+      /src/target/release/build \
+    && scripts/artifact-readiness verify-dockerfile Dockerfile \
+    && touch /tmp/pggomtm-candidate-artifact-gate-passed
+
+FROM candidate-content
+
+RUN --mount=type=bind,from=candidate-artifact-gate,source=/tmp/pggomtm-candidate-artifact-gate-passed,target=/tmp/pggomtm-candidate-artifact-gate-passed,ro \
+    test -f /tmp/pggomtm-candidate-artifact-gate-passed
+
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["postgres"]
