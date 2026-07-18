@@ -26,7 +26,7 @@
 
 `.github/workflows/ci.yml`是 PR、`main` push 与 release 调用复用的验证入口，负责依赖解析、Rustfmt、Clippy、Cargo tests、C/Rust ABI、真实 PG18 OAuth、production module 和最终 image。PR 与`main`只读运行且不上传release材料；只有SemVer tag workflow调用时才短暂传递同一run已验证的OCI archive。根`Dockerfile`只构建production image，不承载测试或扫描器。
 
-维护者和 Agent 可以把范围明确的 commit 直接非 force 推送到 `main`。失败 commit 保留并通过后续 commit 修复；失败 run 不得发布 candidate 或 stable。
+维护者和 Agent 可以把范围明确的 commit 直接非 force 推送到 `main`。失败 commit 保留并通过后续 commit 修复；没有显式 SemVer tag 的 run 不得发布 image、GitHub Release 或 attestation。
 
 本地工作区只用于源码/OpenSpec编辑、Git操作和只读调查。不得在本地运行 Cargo、原生编译、Docker build/run、临时 PostgreSQL 或 image 检查。
 
@@ -41,13 +41,13 @@ gh run view <run-id> --repo codeh007/mtmpg --log-failed
 
 mtmpg 使用 SemVer 作为用户可见身份：
 
-- Candidate tag：`ghcr.io/codeh007/mtmpg-postgres:<version>-rc.<run>`
-- Stable tag：`ghcr.io/codeh007/mtmpg-postgres:<version>`
-- `latest`：只指向最近一次 stable
+- Prerelease：`ghcr.io/codeh007/mtmpg:<prerelease>`，例如 `0.1.0-rc.1`
+- Stable：`ghcr.io/codeh007/mtmpg:<stable>`
+- `latest`：只在完整 stable release 成功后更新
 
-CI 在每次 run 内解析实际 Cargo lockfile、toolchain、PG18 minor 和 base digest，并把它们与 source、module、OCI digest、SBOM、provenance 和 attestation 一起记录。Gomtmui 按 candidate SemVer 验收，consumer evidence 记录实际 OCI digest；stable promotion只为同一已验收 digest增加稳定tag和immutable GitHub Release，不重建image。
+`.github/workflows/release.yml`只响应严格校验通过的 `v<semver>` tag。它调用同一 `ci.yml`，下载该 run 已验证的 OCI archive后推送一次，不在publish job中运行Cargo或Docker build。Prerelease与stable分别从自己的不可变tag完整解析、测试、构建和发布。
 
-当前可部署版本以公开GHCR、GitHub Release和对应attestation为准。发布进度由 [mtmpg #1](https://github.com/codeh007/mtmpg/issues/1) 和 active OpenSpec change 跟踪。
+每个release的长期权威是版本化公开GHCR image、GitHub Release、Cargo.lock、`resolved-inputs.json`、release manifest、checksums、SPDX SBOM、provenance与GitHub attestation。Actions artifact只用于同一次run内传递。当前prerelease见 [v0.1.0-rc.1](https://github.com/codeh007/mtmpg/releases/tag/v0.1.0-rc.1)；发布进度由 [mtmpg #1](https://github.com/codeh007/mtmpg/issues/1) 和 active OpenSpec change 跟踪。
 
 ## 维护入口
 

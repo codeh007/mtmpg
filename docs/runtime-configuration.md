@@ -14,7 +14,7 @@
 部署不得设置`PGGOMTM_CONFIG_PATH`等路径覆盖，也不得通过GUC或host-based authentication（HBA）参数选择第二个文件。推荐的容器mount形式如下。宿主source目录由平台配置authority管理，不属于signing secret authority。
 
 ```text
---mount type=bind,src=/srv/pggomtm-candidate,dst=/etc/pggomtm,readonly
+--mount type=bind,src=/srv/pggomtm,dst=/etc/pggomtm,readonly
 ```
 
 两个文件必须满足以下条件：

@@ -8,7 +8,7 @@
 - `Cargo.toml` 声明兼容依赖范围，`rust-toolchain.toml` 使用 stable；release用 `Cargo.lock` 只由远端CI解析并保存为发布证据。
 - `tests/` 承载Rust领域测试、官方C layout probe、真实PG18和final-image行为测试及最小fixture。
 - `Dockerfile` 只构建production module并组装PG18 runtime image。
-- `.github/workflows/` 是依赖解析、重计算、candidate和promotion入口。
+- `.github/workflows/` 是PR/main只读CI与SemVer tag release入口。
 - `openspec/` 是需求、设计和task状态权威；Git、Actions、Release和attestation保存历史证据。
 
 不要引入Cargo workspace、嵌套crate、生产HTTP服务、第二Dockerfile或本地image fallback。

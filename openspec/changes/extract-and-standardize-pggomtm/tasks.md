@@ -60,11 +60,11 @@
 
 - [x] 7.1 将Cargo package version设为首个合法prerelease（`0.1.0-rc.1`），并要求去除前导`v`后的Git tag与package version精确一致
 - [x] 7.2 增加只由合法SemVer tag触发的`release.yml`，调用可复用CI并以最小写权限下载和推送同一已验证OCI archive
-- [ ] 7.3 发布公开`ghcr.io/codeh007/mtmpg:0.1.0-rc.1`与GitHub prerelease，拒绝既有version、错误source、失败门禁和任何`latest`更新
-- [ ] 7.4 生成精简release manifest、Cargo.lock、resolved inputs与checksums作为Release assets，并为同一image digest生成标准SBOM、provenance和GitHub attestation
-- [ ] 7.5 匿名拉取versioned image，复验source/version label、module/registry digest、Release assets和attestation，证明Actions artifact不是长期消费权威
-- [ ] 7.6 在新命名prerelease完整可读后精确退役`mtmpg-postgres`旧阶段性package versions与孤立attestation referrer，保留Git、Actions run和Issue历史
-- [ ] 7.7 更新README、release/compatibility与维护文档，只描述PR/main CI、SemVer tag release、`ghcr.io/codeh007/mtmpg`和标准供应链材料，并完成聚焦检查与严格OpenSpec校验
+- [x] 7.3 发布公开`ghcr.io/codeh007/mtmpg:0.1.0-rc.1`与GitHub prerelease，拒绝既有version、错误source、失败门禁和任何`latest`更新
+- [x] 7.4 生成精简release manifest、Cargo.lock、resolved inputs与checksums作为Release assets，并为同一image digest生成标准SBOM、provenance和GitHub attestation
+- [x] 7.5 匿名拉取versioned image，复验source/version label、module/registry digest、Release assets和attestation，证明Actions artifact不是长期消费权威
+- [x] 7.6 在新命名prerelease完整可读后精确退役`mtmpg-postgres`旧阶段性package versions与孤立attestation referrer，保留Git、Actions run和Issue历史
+- [x] 7.7 更新README、release/compatibility与维护文档，只描述PR/main CI、SemVer tag release、`ghcr.io/codeh007/mtmpg`和标准供应链材料，并完成聚焦检查与严格OpenSpec校验
 - [ ] 7.8 完成7.7后在mtmpg #1与gomtmui #116/#117回填阶段性结果，记录prerelease、source、OCI digest、Actions run、Release/attestation和未完成stable事项
 
 ## 8. 独立Stable发布与收尾
