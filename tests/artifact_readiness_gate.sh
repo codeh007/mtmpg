@@ -246,6 +246,8 @@ assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
 assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
   "scripts/artifact-readiness verify-elf"
 assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
+  "RUN install --directory --mode=0755 --owner=0 --group=0"
+assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
   "AS runtime-base-inventory"
 assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
   "AS candidate-content"

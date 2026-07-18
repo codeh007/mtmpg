@@ -520,6 +520,9 @@ RUN --mount=type=bind,from=runtime-base,source=/,target=/tmp/pggomtm-runtime-bas
 
 FROM runtime-base AS candidate-content
 
+RUN install --directory --mode=0755 --owner=0 --group=0 \
+      /usr/share/doc/pggomtm
+
 COPY --from=build --chown=0:0 --chmod=0644 /src/target/release/libpggomtm.so /usr/lib/postgresql/18/lib/pggomtm.so
 COPY --from=build --chown=0:0 --chmod=0644 /src/LICENSE /usr/share/doc/pggomtm/LICENSE
 COPY --from=build --chown=0:0 --chmod=0644 /tmp/pggomtm-build-manifest.json /usr/share/doc/pggomtm/build-manifest.json
