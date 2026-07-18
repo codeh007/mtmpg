@@ -97,7 +97,7 @@ install -d -m 0700 "${SESSION_ROOT}/fixtures"
 cat >"${SESSION_ROOT}/init.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-psql --set ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'SQL'
+psql --host=/tmp --set ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'SQL'
 CREATE ROLE gomtm_candidate_ordinary LOGIN;
 SQL
 cat >"$PGDATA/pg_hba.conf" <<'HBA'
