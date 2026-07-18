@@ -1,6 +1,6 @@
 # pggomtm 发布与兼容契约
 
-公开`main`是开发主线，不表示stable。mtmpg尚未完成首个可消费candidate或stable；发布状态以GitHub Release、GHCR和对应attestation为准。
+公开`main`是开发主线，不表示stable。可消费candidate与stable的状态以GitHub Release、GHCR和对应attestation为准。
 
 ## 版本域
 

@@ -41,7 +41,7 @@ jobs:
           test -z "$(git status --porcelain)"
 
       - name: Scan source and history for secrets
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
@@ -101,7 +101,7 @@ jobs:
           test "$host_minor" = "$image_minor"
 
           base_version="$(cargo metadata --locked --no-deps --format-version 1 | jq --raw-output '.packages[0].version')"
-          candidate_version="${base_version}-rc.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+          candidate_version="${base_version}-rc.${GITHUB_RUN_ID}"
           lock_sha256="$(sha256sum Cargo.lock | cut -d' ' -f1)"
           header_sha256="$(sha256sum "$($PGRX_PG_CONFIG_PATH --includedir-server)/libpq/oauth.h" | cut -d' ' -f1)"
           pgrx_version="$(cargo metadata --locked --format-version 1 | jq --raw-output '.packages[] | select(.name == "pgrx") | .version' | head -n 1)"
@@ -232,6 +232,7 @@ jobs:
             --arg cargo_lock_sha256 "$(sha256sum Cargo.lock | cut -d' ' -f1)" \
             --arg module_sha256 "$(sha256sum "$RUNNER_TEMP/pggomtm.so" | cut -d' ' -f1)" \
             --arg oci_archive_sha256 "$(sha256sum "$RUNNER_TEMP/mtmpg-postgres.oci.tar" | cut -d' ' -f1)" \
+            --arg oci_manifest_digest "$(skopeo inspect --format '{{.Digest}}' "oci-archive:$RUNNER_TEMP/mtmpg-postgres.oci.tar")" \
             '{
               schema: "mtmpg-verified-candidate/v1",
               source: $source,
@@ -239,18 +240,330 @@ jobs:
               resolved_inputs_sha256: $resolved_inputs_sha256,
               cargo_lock_sha256: $cargo_lock_sha256,
               module_sha256: $module_sha256,
-              oci_archive_sha256: $oci_archive_sha256
+              oci_archive_sha256: $oci_archive_sha256,
+              oci_manifest_digest: $oci_manifest_digest
             }' >candidate-metadata.json
 
+          material_root="$RUNNER_TEMP/candidate-materials"
+          install -d -m 0755 "$material_root"
+          install -m 0644 \
+            Cargo.lock \
+            resolved-inputs.json \
+            candidate-metadata.json \
+            "$material_root"
+          mv "$RUNNER_TEMP/mtmpg-postgres.oci.tar" "$material_root/"
+          chmod 0644 "$material_root/mtmpg-postgres.oci.tar"
+
       - name: Upload verified candidate materials
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mtmpg-candidate-${{ github.sha }}-${{ github.run_attempt }}
-          path: |
-            Cargo.lock
-            resolved-inputs.json
-            candidate-metadata.json
-            ${{ runner.temp }}/mtmpg-postgres.oci.tar
+          path: ${{ runner.temp }}/candidate-materials/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
           compression-level: 0
+
+  publish-candidate:
+    name: Publish verified SemVer candidate
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'codeh007/mtmpg'
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
+    steps:
+      - name: Download verified candidate materials
+        uses: actions/download-artifact@v8
+        with:
+          name: mtmpg-candidate-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/candidate-materials
+
+      - name: Install registry inspection tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            ca-certificates \
+            jq \
+            skopeo
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Verify and publish the immutable candidate
+        shell: bash
+        env:
+          IMAGE_REPOSITORY: ghcr.io/codeh007/mtmpg-postgres
+        run: |
+          set -euo pipefail
+          material_root="$RUNNER_TEMP/candidate-materials"
+          oci_archive="$material_root/mtmpg-postgres.oci.tar"
+          auth_file="$HOME/.docker/config.json"
+          for required in \
+            Cargo.lock \
+            resolved-inputs.json \
+            candidate-metadata.json \
+            mtmpg-postgres.oci.tar; do
+            test -f "$material_root/$required"
+          done
+          test -f "$auth_file"
+
+          candidate_version="$(jq --raw-output '.version' "$material_root/candidate-metadata.json")"
+          test "$(jq --raw-output '.source' "$material_root/candidate-metadata.json")" = "$GITHUB_SHA"
+          test "$(jq --raw-output '.source' "$material_root/resolved-inputs.json")" = "$GITHUB_SHA"
+          test "$(jq --raw-output '.version' "$material_root/resolved-inputs.json")" = "$candidate_version"
+          test "$(jq --raw-output '.workflow.run_id' "$material_root/resolved-inputs.json")" = "$GITHUB_RUN_ID"
+          test "$(jq --raw-output '.workflow.run_attempt' "$material_root/resolved-inputs.json")" = "$GITHUB_RUN_ATTEMPT"
+          [[ "$candidate_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.${GITHUB_RUN_ID}$ ]]
+
+          cargo_lock_sha256="$(sha256sum "$material_root/Cargo.lock" | cut -d' ' -f1)"
+          resolved_inputs_sha256="$(sha256sum "$material_root/resolved-inputs.json" | cut -d' ' -f1)"
+          oci_archive_sha256="$(sha256sum "$oci_archive" | cut -d' ' -f1)"
+          test "$cargo_lock_sha256" = "$(jq --raw-output '.cargo_lock_sha256' "$material_root/resolved-inputs.json")"
+          test "$cargo_lock_sha256" = "$(jq --raw-output '.cargo_lock_sha256' "$material_root/candidate-metadata.json")"
+          test "$resolved_inputs_sha256" = "$(jq --raw-output '.resolved_inputs_sha256' "$material_root/candidate-metadata.json")"
+          test "$oci_archive_sha256" = "$(jq --raw-output '.oci_archive_sha256' "$material_root/candidate-metadata.json")"
+
+          archive_manifest_digest="$(skopeo inspect --format '{{.Digest}}' "oci-archive:$oci_archive")"
+          test "$archive_manifest_digest" = "$(jq --raw-output '.oci_manifest_digest' "$material_root/candidate-metadata.json")"
+          target_reference="$IMAGE_REPOSITORY:$candidate_version"
+          if skopeo inspect --authfile "$auth_file" "docker://$target_reference" >/dev/null 2>&1; then
+            echo "candidate version already exists: $candidate_version" >&2
+            exit 1
+          fi
+
+          digest_file="$RUNNER_TEMP/registry-digest.txt"
+          skopeo copy \
+            --authfile "$auth_file" \
+            --preserve-digests \
+            --digestfile "$digest_file" \
+            "oci-archive:$oci_archive" \
+            "docker://$target_reference"
+          registry_digest="$(tr -d '\n' <"$digest_file")"
+          [[ "$registry_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$registry_digest" = "$archive_manifest_digest"
+          test "$(skopeo inspect --authfile "$auth_file" --format '{{.Digest}}' "docker://$target_reference")" = "$registry_digest"
+
+          {
+            echo "CANDIDATE_VERSION=$candidate_version"
+            echo "EVIDENCE_ROOT=$RUNNER_TEMP/candidate-evidence"
+            echo "IMAGE_REPOSITORY=$IMAGE_REPOSITORY"
+            echo "MATERIAL_ROOT=$material_root"
+            echo "REGISTRY_DIGEST=$registry_digest"
+          } >>"$GITHUB_ENV"
+
+      - name: Make the GHCR package public
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api \
+            --method PATCH \
+            /user/packages/container/mtmpg-postgres \
+            -f visibility=public >/dev/null
+
+      - name: Download current Syft
+        id: syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate release manifest and SBOM from the verified archive
+        shell: bash
+        env:
+          SYFT_BIN: ${{ steps.syft.outputs.cmd }}
+        run: |
+          set -euo pipefail
+          install -d -m 0755 "$EVIDENCE_ROOT"
+          install -m 0644 \
+            "$MATERIAL_ROOT/Cargo.lock" \
+            "$MATERIAL_ROOT/resolved-inputs.json" \
+            "$MATERIAL_ROOT/candidate-metadata.json" \
+            "$EVIDENCE_ROOT"
+
+          "$SYFT_BIN" \
+            "oci-archive:$MATERIAL_ROOT/mtmpg-postgres.oci.tar" \
+            --output "spdx-json=$EVIDENCE_ROOT/sbom.spdx.json"
+          jq --exit-status \
+            '(.spdxVersion | startswith("SPDX-")) and ((.packages // []) | length > 0)' \
+            "$EVIDENCE_ROOT/sbom.spdx.json" >/dev/null
+          syft_version="$("$SYFT_BIN" version -o json | jq --raw-output '.version')"
+          skopeo_version="$(skopeo --version)"
+          sbom_sha256="$(sha256sum "$EVIDENCE_ROOT/sbom.spdx.json" | cut -d' ' -f1)"
+
+          jq --null-input \
+            --slurpfile resolved "$MATERIAL_ROOT/resolved-inputs.json" \
+            --slurpfile candidate "$MATERIAL_ROOT/candidate-metadata.json" \
+            --arg image_repository "$IMAGE_REPOSITORY" \
+            --arg registry_digest "$REGISTRY_DIGEST" \
+            --arg sbom_sha256 "$sbom_sha256" \
+            --arg skopeo "$skopeo_version" \
+            --arg syft "$syft_version" \
+            '{
+              schema: "mtmpg-release-manifest/v1",
+              version: $candidate[0].version,
+              source: $candidate[0].source,
+              workflow: $resolved[0].workflow,
+              cargo_lock_sha256: $candidate[0].cargo_lock_sha256,
+              resolved_inputs_sha256: $candidate[0].resolved_inputs_sha256,
+              rust: $resolved[0].rust,
+              pgrx: $resolved[0].pgrx,
+              postgresql: $resolved[0].postgresql,
+              module: {
+                path: "/usr/lib/postgresql/18/lib/pggomtm.so",
+                sha256: $candidate[0].module_sha256
+              },
+              oci: {
+                archive_sha256: $candidate[0].oci_archive_sha256,
+                manifest_digest: $candidate[0].oci_manifest_digest,
+                repository: $image_repository,
+                reference: ($image_repository + ":" + $candidate[0].version),
+                registry_digest: $registry_digest
+              },
+              sbom: {format: "spdx-json", sha256: $sbom_sha256},
+              tooling: {skopeo: $skopeo, syft: $syft}
+            }' >"$EVIDENCE_ROOT/release-manifest.json"
+
+      - name: Attest candidate provenance
+        id: provenance
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.IMAGE_REPOSITORY }}
+          subject-digest: ${{ env.REGISTRY_DIGEST }}
+          subject-version: ${{ env.CANDIDATE_VERSION }}
+          push-to-registry: true
+
+      - name: Attest candidate SBOM
+        id: sbom-attestation
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.IMAGE_REPOSITORY }}
+          subject-digest: ${{ env.REGISTRY_DIGEST }}
+          subject-version: ${{ env.CANDIDATE_VERSION }}
+          sbom-path: ${{ env.EVIDENCE_ROOT }}/sbom.spdx.json
+          push-to-registry: true
+
+      - name: Verify anonymous image and finalize evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          provenance_bundle="${{ steps.provenance.outputs.bundle-path }}"
+          provenance_id="${{ steps.provenance.outputs.attestation-id }}"
+          provenance_url="${{ steps.provenance.outputs.attestation-url }}"
+          sbom_bundle="${{ steps.sbom-attestation.outputs.bundle-path }}"
+          sbom_attestation_id="${{ steps.sbom-attestation.outputs.attestation-id }}"
+          sbom_attestation_url="${{ steps.sbom-attestation.outputs.attestation-url }}"
+          test -s "$provenance_bundle"
+          test -s "$sbom_bundle"
+          test -n "$provenance_id"
+          test -n "$provenance_url"
+          test -n "$sbom_attestation_id"
+          test -n "$sbom_attestation_url"
+          install -m 0644 "$provenance_bundle" "$EVIDENCE_ROOT/provenance.intoto.jsonl"
+          install -m 0644 "$sbom_bundle" "$EVIDENCE_ROOT/sbom-attestation.intoto.jsonl"
+          jq --slurp --exit-status \
+            'length > 0 and all(.[]; has("dsseEnvelope") and has("verificationMaterial"))' \
+            "$EVIDENCE_ROOT/provenance.intoto.jsonl" >/dev/null
+          jq --slurp --exit-status \
+            'length > 0 and all(.[]; has("dsseEnvelope") and has("verificationMaterial"))' \
+            "$EVIDENCE_ROOT/sbom-attestation.intoto.jsonl" >/dev/null
+
+          jq --null-input \
+            --arg provenance_id "$provenance_id" \
+            --arg provenance_url "$provenance_url" \
+            --arg sbom_id "$sbom_attestation_id" \
+            --arg sbom_url "$sbom_attestation_url" \
+            --arg subject "$IMAGE_REPOSITORY@$REGISTRY_DIGEST" \
+            '{
+              schema: "mtmpg-attestation/v1",
+              subject: $subject,
+              provenance: {id: $provenance_id, url: $provenance_url},
+              sbom: {id: $sbom_id, url: $sbom_url}
+            }' \
+            >"$EVIDENCE_ROOT/attestation.json"
+          provenance_sha256="$(sha256sum "$EVIDENCE_ROOT/provenance.intoto.jsonl" | cut -d' ' -f1)"
+          sbom_attestation_sha256="$(sha256sum "$EVIDENCE_ROOT/sbom-attestation.intoto.jsonl" | cut -d' ' -f1)"
+          manifest_next="$RUNNER_TEMP/release-manifest.next.json"
+          jq \
+            --arg provenance_sha256 "$provenance_sha256" \
+            --arg sbom_attestation_sha256 "$sbom_attestation_sha256" \
+            --arg provenance_id "$provenance_id" \
+            --arg provenance_url "$provenance_url" \
+            --arg sbom_id "$sbom_attestation_id" \
+            --arg sbom_url "$sbom_attestation_url" \
+            '. + {
+              provenance: {format: "in-toto-jsonl", sha256: $provenance_sha256},
+              attestation: {
+                provenance: {id: $provenance_id, url: $provenance_url},
+                sbom: {id: $sbom_id, url: $sbom_url, sha256: $sbom_attestation_sha256}
+              }
+            }' \
+            "$EVIDENCE_ROOT/release-manifest.json" >"$manifest_next"
+          mv "$manifest_next" "$EVIDENCE_ROOT/release-manifest.json"
+
+          anonymous_auth="$RUNNER_TEMP/anonymous-auth.json"
+          anonymous_inspect="$RUNNER_TEMP/anonymous-inspect.json"
+          printf '{"auths":{}}\n' >"$anonymous_auth"
+          anonymous_ready=0
+          for _ in $(seq 1 10); do
+            if skopeo inspect \
+              --authfile "$anonymous_auth" \
+              "docker://$IMAGE_REPOSITORY:$CANDIDATE_VERSION" \
+              >"$anonymous_inspect" 2>/dev/null; then
+              anonymous_ready=1
+              break
+            fi
+            sleep 3
+          done
+          test "$anonymous_ready" -eq 1
+          jq --exit-status \
+            --arg digest "$REGISTRY_DIGEST" \
+            --arg source "$GITHUB_SHA" \
+            --arg version "$CANDIDATE_VERSION" \
+            '.Digest == $digest and
+             .Labels["org.opencontainers.image.revision"] == $source and
+             .Labels["org.opencontainers.image.version"] == $version' \
+            "$anonymous_inspect" >/dev/null
+          jq --exit-status \
+            --arg digest "$REGISTRY_DIGEST" \
+            --arg source "$GITHUB_SHA" \
+            --arg version "$CANDIDATE_VERSION" \
+            '.version == $version and .source == $source and
+             .oci.manifest_digest == $digest and
+             .oci.registry_digest == $digest' \
+            "$EVIDENCE_ROOT/release-manifest.json" >/dev/null
+
+          (
+            cd "$EVIDENCE_ROOT"
+            sha256sum \
+              Cargo.lock \
+              resolved-inputs.json \
+              candidate-metadata.json \
+              release-manifest.json \
+              sbom.spdx.json \
+              provenance.intoto.jsonl \
+              sbom-attestation.intoto.jsonl \
+              attestation.json \
+              >checksums.txt
+            sha256sum --check checksums.txt
+          )
+
+      - name: Upload candidate release evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: mtmpg-evidence-${{ env.CANDIDATE_VERSION }}
+          path: ${{ env.EVIDENCE_ROOT }}/
+          if-no-files-found: error
+          retention-days: 30

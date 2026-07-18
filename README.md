@@ -47,7 +47,7 @@ mtmpg 使用 SemVer 作为用户可见身份：
 
 CI 在每次 run 内解析实际 Cargo lockfile、toolchain、PG18 minor 和 base digest，并把它们与 source、module、OCI digest、SBOM、provenance 和 attestation 一起记录。Gomtmui 按 candidate SemVer 验收，consumer evidence 记录实际 OCI digest；stable promotion只为同一已验收 digest增加稳定tag和immutable GitHub Release，不重建image。
 
-在首个 candidate/stable 完成前，本仓库没有可部署发布版。进度由 [mtmpg #1](https://github.com/codeh007/mtmpg/issues/1) 和 active OpenSpec change 跟踪。
+当前可部署版本以公开GHCR、GitHub Release和对应attestation为准。发布进度由 [mtmpg #1](https://github.com/codeh007/mtmpg/issues/1) 和 active OpenSpec change 跟踪。
 
 ## 维护入口
 

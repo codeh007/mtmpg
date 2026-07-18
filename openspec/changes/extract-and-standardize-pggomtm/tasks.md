@@ -36,7 +36,7 @@
 - [x] 4.4 合并官方PG18 header生成、C/Rust layout和导出symbol测试，删除针对固定bindings bytes和ambient formatter的过度provenance矩阵
 - [x] 4.5 精简真实PostgreSQL harness，使用本次解析的PG18 minor验证module加载、OAuth allow/deny、role、`system_user`和错误脱敏
 - [x] 4.6 删除现有复杂`scripts/`入口；将Cargo编排交给workflow、secret scan交给标准Action、PG/image harness放入`tests/`，只在确有多处复用时保留小型单职责入口
-- [ ] 4.7 建立精简final-image检查，验证官方entrypoint/initdb、PG18、真实`pkglibdir`、module加载、动态依赖、OAuth smoke及无private/test material
+- [x] 4.7 建立精简final-image检查，验证官方entrypoint/initdb、PG18、真实`pkglibdir`、module加载、动态依赖、OAuth smoke及无private/test material
 
 ## 5. 单次解析与只读Native CI
 
@@ -45,7 +45,7 @@
 - [x] 5.3 用标准source/secret和dependency/license检查替代自定义历史collector及其自测，保持PR/fork lane完全只读
 - [x] 5.4 从同一resolved inputs只构建一次production image，完成final-image验证后物化可传递OCI archive及module identity
 - [x] 5.5 上传已验证OCI archive、Cargo.lock、resolved inputs和只读测试结果供后续publish job使用，验证artifact与source绑定
-- [ ] 5.6 将精简实现直接提交到`main`，只依据精确SHA的远端Actions日志前进修复，取得resolve、领域、ABI、PG18和final-image完整成功结果
+- [x] 5.6 将精简实现直接提交到`main`，只依据精确SHA的远端Actions日志前进修复，取得resolve、领域、ABI、PG18和final-image完整成功结果
 
 ## 6. SemVer Candidate与供应链证据
 
