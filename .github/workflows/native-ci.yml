@@ -304,13 +304,18 @@ jobs:
           password: ${{ github.token }}
 
       - name: Resolve current ORAS client
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          docker pull ghcr.io/oras-project/oras:latest >/dev/null
+          oras_tag="$(gh api /repos/oras-project/oras/releases/latest --jq '.tag_name')"
+          [[ "$oras_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          oras_reference="ghcr.io/oras-project/oras:$oras_tag"
+          docker pull "$oras_reference" >/dev/null
           oras_image="$(docker image inspect \
             --format '{{ index .RepoDigests 0 }}' \
-            ghcr.io/oras-project/oras:latest)"
+            "$oras_reference")"
           [[ "$oras_image" =~ ^ghcr\.io/oras-project/oras@sha256:[0-9a-f]{64}$ ]]
           oras_version="$(docker run --rm "$oras_image" version | awk '/^Version:/ {print $2}')"
           test -n "$oras_version"
