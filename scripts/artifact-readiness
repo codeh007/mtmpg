@@ -651,10 +651,17 @@ verify_mode_owner() {
   local path="$1"
   local expected_mode="$2"
 
-  test "$(stat --format='%a' -- "${path}")" = "${expected_mode}" || \
-    fail "runtime artifact mode is not approved"
-  test "$(stat --format='%u:%g' -- "${path}")" = "0:0" || \
-    fail "runtime artifact owner is not root:root"
+  local actual_mode
+  actual_mode="$(stat --format='%a' -- "${path}")" || \
+    fail "runtime artifact mode could not be read"
+  test "${actual_mode}" = "${expected_mode}" || \
+    fail "runtime artifact mode is not approved: path=${path} expected=${expected_mode} actual=${actual_mode}"
+
+  local actual_owner
+  actual_owner="$(stat --format='%u:%g' -- "${path}")" || \
+    fail "runtime artifact owner could not be read"
+  test "${actual_owner}" = "0:0" || \
+    fail "runtime artifact owner is not root:root: path=${path} actual=${actual_owner}"
 }
 
 verify_runtime() {
