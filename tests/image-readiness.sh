@@ -82,13 +82,14 @@ for forbidden in \
   fi
 done
 
-install -d -m 0555 "${SESSION_ROOT}/config"
+install -d -m 0755 "${SESSION_ROOT}/config"
 install -m 0444 \
   "${REPOSITORY_ROOT}/tests/fixtures/runtime-config/validator.json" \
   "${SESSION_ROOT}/config/validator.json"
 install -m 0444 \
   "${REPOSITORY_ROOT}/tests/fixtures/runtime-config/jwks.json" \
   "${SESSION_ROOT}/config/jwks.json"
+chmod 0555 "${SESSION_ROOT}/config"
 install -d -m 0700 "${SESSION_ROOT}/fixtures"
 "${ARTIFACT_ROOT}/pggomtm_oauth_smoke_fixture" generate "${SESSION_ROOT}/fixtures"
 
