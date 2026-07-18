@@ -62,18 +62,18 @@ Validator SHALL只接受固定ES256、唯一issuer/audience、database scope和3
 - **THEN** `authn_id -> system_user -> decoded identity` SHALL无损保留归因字段且不包含secret
 
 ### Requirement: Production artifact不得包含测试能力
-Candidate与stable module SHALL只启用production features，并 MUST排除gate callbacks、test fixtures、内置JWKS/key/token、probe symbols和fallback路径。Validator只在连接认证时检查token，不声称token过期或credential撤销会终止已建立backend。
+Prerelease与stable module SHALL只启用production features，并 MUST排除gate callbacks、test fixtures、内置JWKS/key/token、probe symbols和fallback路径。Validator只在连接认证时检查token，不声称token过期或credential撤销会终止已建立backend。
 
 #### Scenario: 检查production module
 - **WHEN** CI检查最终module并在真实PG18 image中加载它
 - **THEN** artifact SHALL只包含正式validator能力，任何测试symbol、private material或fixture命中 SHALL阻止发布
 
 ### Requirement: 部署支持必须跟随PG18最新稳定minor
-每次candidate构建 SHALL解析并使用PG18 major内当前最新稳定development/runtime，且构建、ABI测试、真实PostgreSQL测试和最终image MUST使用该次run记录的同一minor。Release evidence SHALL记录实际Rust、pgrx、PostgreSQL、header、module和runtime版本/digest，但源码与测试 MUST NOT预先批准某个PG18 minor或对应hash。
+每次CI与SemVer release构建 SHALL解析并使用PG18 major内当前最新稳定development/runtime，且构建、ABI测试、真实PostgreSQL测试和最终image MUST使用该次run记录的同一minor。Release材料 SHALL记录实际Rust、pgrx、PostgreSQL、header、module和runtime版本/digest，但源码与测试 MUST NOT预先批准某个PG18 minor或对应hash。
 
 #### Scenario: PG18发布新稳定minor
 - **WHEN** 浮动PG18通道解析到比上一release更新的稳定minor
-- **THEN** CI SHALL基于新header重新生成ABI、运行完整真实测试并只在成功后发布新的mtmpg candidate version
+- **THEN** CI SHALL基于新header重新生成ABI并运行完整真实测试，只有显式的新SemVer tag通过后才发布对应mtmpg version
 
 #### Scenario: 消费者尝试其他major
 - **WHEN** artifact被计划用于PG17、PG19或其他未显式支持的major

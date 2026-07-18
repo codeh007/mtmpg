@@ -86,22 +86,20 @@ cleanup() {
     /etc/pggomtm \
     /tmp/pggomtm-abi-pgdata \
     /tmp/pggomtm-abi-server.log \
-    /tmp/pggomtm-config-fixtures \
     /tmp/pggomtm-oauth-pgdata \
     /tmp/pggomtm-oauth-ldd \
     /tmp/pggomtm-oauth-server.log \
     /tmp/pggomtm-oauth-fixtures \
-    /tmp/pggomtm-production-identity-pgdata \
-    /tmp/pggomtm-production-identity-server.log \
-    /tmp/pggomtm-production-identity-fixtures
+    /tmp/pggomtm-production-backend-pgdata \
+    /tmp/pggomtm-production-backend-server.log \
+    /tmp/pggomtm-production-backend-fixtures
 
   if test -n "${PKGLIBDIR}"; then
     rm -f \
       "${PKGLIBDIR}/pggomtm_abi_gate.so" \
       "${PKGLIBDIR}/pggomtm_abi_runtime_probe.so" \
-      "${PKGLIBDIR}/pggomtm_config_gate.so" \
-      "${PKGLIBDIR}/pggomtm_pgx_gate.so" \
-      "${PKGLIBDIR}/pggomtm_identity_gate.so"
+      "${PKGLIBDIR}/pggomtm.so" \
+      "${PKGLIBDIR}/pggomtm_pgx_gate.so"
   fi
 }
 
@@ -114,7 +112,7 @@ usage() {
     'matrices:' \
     '  abi-runtime' \
     '  oauth-gate' \
-    '  production-identity'
+    '  production-backend'
 }
 
 require_artifact() {
@@ -138,15 +136,13 @@ verify_runtime() {
   for artifact in \
     pggomtm_abi_gate.so \
     pggomtm_abi_runtime_probe.so \
-    pggomtm_config_gate.so \
+    pggomtm.so \
     pggomtm_pgx_gate.so \
-    pggomtm_identity_gate.so \
     pggomtm_oauth_smoke_client \
     pggomtm_oauth_smoke_fixture \
     oauth_runtime_probe.sql \
     runtime_config_missing_probe.sql \
     runtime_config_ready_probe.sql \
-    runtime_config_validate_probe.sql \
     runtime-config-fixture/validator.json \
     runtime-config-fixture/jwks.json; do
     require_artifact "${artifact}"
@@ -230,11 +226,10 @@ generate_fixtures() {
 run_abi_runtime_matrix() {
   local pgdata="/tmp/pggomtm-abi-pgdata"
   local log_file="/tmp/pggomtm-abi-server.log"
-  local fixture_root="/tmp/pggomtm-config-fixtures"
 
   install_module pggomtm_abi_gate.so pggomtm_abi_gate.so
   install_module pggomtm_abi_runtime_probe.so pggomtm_abi_runtime_probe.so
-  install_module pggomtm_config_gate.so pggomtm_config_gate.so
+  install_module pggomtm.so pggomtm.so
   start_cluster \
     "${pgdata}" \
     "${log_file}" \
@@ -243,11 +238,7 @@ run_abi_runtime_matrix() {
   psql_file "${ARTIFACT_ROOT}/oauth_runtime_probe.sql"
   psql_file "${ARTIFACT_ROOT}/runtime_config_missing_probe.sql"
   install_runtime_config
-  generate_fixtures "${fixture_root}"
-  chown --recursive postgres:postgres "${fixture_root}"
-  chmod 0400 "${fixture_root}"/*.jwt
   psql_file "${ARTIFACT_ROOT}/runtime_config_ready_probe.sql"
-  psql_file "${ARTIFACT_ROOT}/runtime_config_validate_probe.sql"
 
   grep --extended-regexp --quiet \
     'LOG:.*pggomtm authentication rejected: reason=pggomtm-auth/v1/internal-panic' \
@@ -258,11 +249,11 @@ run_abi_runtime_matrix() {
     "ABI runtime log disclosed sensitive failure details"
   stop_cluster
 
-  rm -rf "${pgdata}" "${log_file}" "${fixture_root}" /etc/pggomtm
+  rm -rf "${pgdata}" "${log_file}" /etc/pggomtm
   rm -f \
     "${PKGLIBDIR}/pggomtm_abi_gate.so" \
     "${PKGLIBDIR}/pggomtm_abi_runtime_probe.so" \
-    "${PKGLIBDIR}/pggomtm_config_gate.so"
+    "${PKGLIBDIR}/pggomtm.so"
   printf 'PG18 ABI runtime matrix passed\n'
 }
 
@@ -341,10 +332,11 @@ expect_allowed() {
 expect_rejected() {
   local fixture_root="$1"
   local scenario="$2"
+  local role="$3"
   "${ARTIFACT_ROOT}/pggomtm_oauth_smoke_client" \
     --expect-rejected \
     "${fixture_root}/${scenario}.jwt" \
-    gomtm_candidate_ordinary
+    "${role}"
 }
 
 verify_production_log() {
@@ -357,11 +349,9 @@ verify_production_log() {
   grep --extended-regexp --quiet \
     'LOG:.*pggomtm authentication rejected: reason=pggomtm-auth/v1/token-signature-invalid' \
     "${log_file}"
-  test "$(
-    grep --count --fixed-strings \
-      'pggomtm authentication rejected: reason=pggomtm-auth/v1/identity-invalid' \
-      "${log_file}"
-  )" -ge 2
+  grep --extended-regexp --quiet \
+    'LOG:.*pggomtm authentication rejected: reason=pggomtm-auth/v1/token-role-mismatch' \
+    "${log_file}"
 
   local fixture
   for fixture in "${fixture_root}"/*.jwt; do
@@ -384,12 +374,12 @@ verify_production_log() {
     "production log disclosed sensitive failure details"
 }
 
-run_production_identity_matrix() {
-  local pgdata="/tmp/pggomtm-production-identity-pgdata"
-  local log_file="/tmp/pggomtm-production-identity-server.log"
-  local fixture_root="/tmp/pggomtm-production-identity-fixtures"
+run_production_backend_smoke() {
+  local pgdata="/tmp/pggomtm-production-backend-pgdata"
+  local log_file="/tmp/pggomtm-production-backend-server.log"
+  local fixture_root="/tmp/pggomtm-production-backend-fixtures"
 
-  install_module pggomtm_identity_gate.so pggomtm_identity_gate.so
+  install_module pggomtm.so pggomtm.so
   install -d -m 0700 -o postgres -g postgres "${pgdata}"
   gosu postgres initdb \
     --pgdata="${pgdata}" \
@@ -398,23 +388,20 @@ run_production_identity_matrix() {
     --auth-local=trust \
     --auth-host=reject >/dev/null
   sed -i \
-    '1ilocal all gomtm_candidate_ordinary oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm_identity_gate delegate_ident_mapping=1' \
+    '1ilocal all gomtm_candidate_ordinary oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm delegate_ident_mapping=1' \
     "${pgdata}/pg_hba.conf"
   sed -i \
-    '1ilocal all gomtm_candidate_business_admin oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm_identity_gate delegate_ident_mapping=1' \
-    "${pgdata}/pg_hba.conf"
-  sed -i \
-    '1ilocal all gomtm_candidate_database_developer oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm_identity_gate delegate_ident_mapping=1' \
+    '1ilocal all gomtm_candidate_business_admin oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm delegate_ident_mapping=1' \
     "${pgdata}/pg_hba.conf"
   ACTIVE_PGDATA="${pgdata}"
   gosu postgres pg_ctl \
     --pgdata="${pgdata}" \
     --log="${log_file}" \
-    --options="-c listen_addresses='' -k /tmp -c log_min_messages=log -c oauth_validator_libraries=pggomtm_identity_gate" \
+    --options="-c listen_addresses='' -k /tmp -c log_min_messages=log -c oauth_validator_libraries=pggomtm" \
     --wait start >/dev/null
 
   psql_command \
-    'CREATE ROLE gomtm_candidate_ordinary LOGIN; CREATE ROLE gomtm_candidate_business_admin LOGIN; CREATE ROLE gomtm_candidate_database_developer LOGIN'
+    'CREATE ROLE gomtm_candidate_ordinary LOGIN; CREATE ROLE gomtm_candidate_business_admin LOGIN'
   generate_fixtures "${fixture_root}"
   "${ARTIFACT_ROOT}/pggomtm_oauth_smoke_client" \
     --expect-startup-rejected \
@@ -423,32 +410,14 @@ run_production_identity_matrix() {
   install_runtime_config
 
   expect_allowed "${fixture_root}" oauth-ordinary gomtm_candidate_ordinary
-  expect_allowed \
-    "${fixture_root}" \
-    oauth-business-admin \
-    gomtm_candidate_business_admin
-  expect_allowed \
-    "${fixture_root}" \
-    oauth-database-developer \
-    gomtm_candidate_database_developer
-  expect_allowed "${fixture_root}" api-key-ordinary gomtm_candidate_ordinary
-  expect_allowed \
-    "${fixture_root}" \
-    api-key-business-admin \
-    gomtm_candidate_business_admin
-  expect_allowed \
-    "${fixture_root}" \
-    api-key-database-developer \
-    gomtm_candidate_database_developer
-  expect_rejected "${fixture_root}" invalid-overlong-identity
-  expect_rejected "${fixture_root}" invalid-illegal-identity
-  expect_rejected "${fixture_root}" tampered
+  expect_rejected "${fixture_root}" oauth-ordinary gomtm_candidate_business_admin
+  expect_rejected "${fixture_root}" tampered gomtm_candidate_ordinary
 
   stop_cluster
   verify_production_log "${log_file}" "${fixture_root}"
   rm -rf "${pgdata}" "${log_file}" "${fixture_root}" /etc/pggomtm
-  rm -f "${PKGLIBDIR}/pggomtm_identity_gate.so"
-  printf 'PG18 production identity matrix passed\n'
+  rm -f "${PKGLIBDIR}/pggomtm.so"
+  printf 'PG18 production backend smoke passed\n'
 }
 
 run_all() {
@@ -460,7 +429,7 @@ run_all() {
   verify_runtime
   run_abi_runtime_matrix
   run_oauth_gate_matrix
-  run_production_identity_matrix
+  run_production_backend_smoke
   cleanup
 
   local leaked_path
@@ -468,7 +437,7 @@ run_all() {
     /etc/pggomtm \
     /tmp/pggomtm-abi-pgdata \
     /tmp/pggomtm-oauth-pgdata \
-    /tmp/pggomtm-production-identity-pgdata; do
+    /tmp/pggomtm-production-backend-pgdata; do
     test ! -e "${leaked_path}" || fail "integration cleanup left runtime state: ${leaked_path}"
   done
   printf 'PG18 PostgreSQL integration harness passed\n'

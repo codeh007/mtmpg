@@ -13,22 +13,28 @@
 - **WHEN** gomtmui部署带有pggomtm的PostgreSQL
 - **THEN** 它 SHALL引用mtmpg发布的版本化image，不得重新构建module
 
-### Requirement: Main必须是唯一持续集成与交付来源
-远端`main` SHALL作为源码持续集成线，并 MAY由维护者或Agent直接非force推进。仓库 MUST NOT要求临时Issue分支、required Pull Request、branch protection、approving review、squash-only或auto-merge作为更新`main`的前置条件。Workflow MUST NOT包含临时分支名称或Issue编号trigger。
+### Requirement: PR、Main与release必须分离
+远端`main` SHALL作为唯一源码持续集成线，并 SHALL允许维护者或Agent直接非force推进。Pull Request与`main` push SHALL复用同一只读CI定义；workflow MUST NOT包含临时分支名称或Issue编号trigger。没有显式SemVer Git tag的commit MUST NOT发布image、GitHub Release或attestation。
 
-`main` MAY暂时处于CI失败状态；失败commit MUST保留在历史中并由后续commit修复，MUST NOT发布candidate、更新stable alias或覆盖既有制品。Git历史和已发布引用 MUST NOT force rewrite。
+仓库 SHALL以required CI和GitHub原生auto-merge处理明确受信任的owner、Agent或批准的Dependabot PR，并 MUST要求外部PR经过人工批准。仓库 MUST NOT使用`pull_request_target`或其他高权限自定义脚本自动合并任意外部代码。指定维护者/Agent SHALL保留直接推进`main`的规则绕过能力。
+
+`main` SHALL允许暂时处于CI失败状态；失败commit MUST保留在历史中并由后续commit修复。Git历史、SemVer tag和已发布引用 MUST NOT force rewrite。
 
 #### Scenario: 直接更新main
 - **WHEN** 维护者或Agent向`main`非force推送一个源码commit
-- **THEN** GitHub Actions SHALL验证该精确commit，且仓库不得要求先创建或人工维护PR
+- **THEN** GitHub Actions SHALL只读验证该精确commit，且没有SemVer tag时不得发布任何release制品
+
+#### Scenario: 受信任PR自动合并
+- **WHEN** owner、Agent或批准的Dependabot PR通过required CI并启用GitHub原生auto-merge
+- **THEN** GitHub SHALL按仓库规则合并该PR，workflow不得自行checkout并以高权限执行合并
 
 #### Scenario: Main验证失败
-- **WHEN** `main`上的resolve、领域测试、ABI、真实PostgreSQL、image或evidence任一门禁失败
-- **THEN** 该commit SHALL继续作为源码历史存在，但新package、tag、Release、attestation和stable更新 SHALL fail closed
+- **WHEN** `main`上的resolve、领域测试、ABI、真实PostgreSQL或image任一门禁失败
+- **THEN** 该commit SHALL继续作为源码历史存在，但不得创建package、tag、Release或attestation
 
 #### Scenario: 外部贡献者提交PR
 - **WHEN** 公开Pull Request面向`main`
-- **THEN** workflow MAY执行只读验证，但 MUST NOT取得package、Release、attestation或跨仓写权限
+- **THEN** workflow SHALL执行只读验证且 MUST NOT取得package、Release、attestation、自动合并或跨仓写权限
 
 ### Requirement: 重计算必须只在GitHub Actions执行
 mtmpg的依赖解析、开发测试、原生编译、临时PostgreSQL cluster、Docker build/run和最终image检查 SHALL只在GitHub-hosted Actions runner执行。共享本地工作区 MUST NOT执行这些重计算；本地只允许源码/规划编辑、Git/OpenSpec操作、只读调查和对已知对象的精确清理。
@@ -50,7 +56,7 @@ Release用`Cargo.lock` MUST由每次CI重新解析并作为证据保存，不得
 
 #### Scenario: 兼容上游发布新版本
 - **WHEN** Rust stable、PG18 minor、兼容Cargo依赖、Action major内版本或标准工具发布更新
-- **THEN** 下一次CI SHALL自动解析该稳定更新并以完整行为门禁决定是否产生新mtmpg candidate
+- **THEN** 下一次CI SHALL自动解析该稳定更新并运行完整行为门禁，但只有后续显式SemVer tag才能产生release
 
 #### Scenario: 上游更新不兼容
 - **WHEN** 最新兼容输入无法构建或未通过真实行为测试
@@ -66,21 +72,27 @@ Release用`Cargo.lock` MUST由每次CI重新解析并作为证据保存，不得
 CI SHALL生成`resolved-inputs.json`并记录source SHA、workflow run、Cargo.lock digest、实际版本和临时base digest。源码与测试 MUST把这些值作为观测结果验证一致性，不得要求它们等于预先写死的patch或hash。
 
 #### Scenario: 单次run解析输入
-- **WHEN** `main` CI开始验证一个source commit
-- **THEN** resolve step SHALL物化Cargo.lock和所有浮动image的实际身份，并把它们传递给全部后续只读与发布job
+- **WHEN** PR、`main`或SemVer tag CI开始验证一个source commit
+- **THEN** resolve step SHALL物化Cargo.lock和所有浮动image的实际身份，并把它们传递给该run的全部后续验证步骤；只有tag release可把结果传给发布job
 
 #### Scenario: 后续job重新解析出不同输入
 - **WHEN** build、test或publish尝试使用不同lockfile、PostgreSQL minor或base digest
-- **THEN** workflow SHALL失败且不得发布candidate
+- **THEN** workflow SHALL失败且不得发布release
 
 ### Requirement: CI必须验证产品行为而不是实现字面量
-每个`main` push SHALL运行Rust领域规则、当前PG18 C/Rust ABI layout、真实临时PostgreSQL OAuth矩阵、production module检查和最终image启动测试。测试 MUST覆盖JWT/role/identity/runtime config/fail-closed、module加载、OAuth allow/deny、`system_user`和错误脱敏。
+每个PR、`main` push与SemVer tag SHALL通过同一可复用CI定义运行Rust领域规则、当前PG18 C/Rust ABI layout、真实临时PostgreSQL OAuth矩阵、production module检查和最终image启动测试。测试 MUST覆盖JWT/role/identity/runtime config/fail-closed、module加载、OAuth allow/deny、`system_user`和错误脱敏。
 
 测试 MUST NOT要求Dockerfile/workflow/脚本包含或不包含特定字符串，也 MUST NOT比较精确版本、archive hash、base layer数量或完整Docker `.Config`。仓库 MUST NOT维护为这些辅助入口伪造Docker、Cargo、GitHub CLI或scanner的大型自测。
 
+完整JWT/profile/role/identity矩阵 SHALL只由Rust领域测试维护，真实backend矩阵 SHALL只由一个PG18 harness维护，最终image SHALL只运行证明打包与启动边界所需的最小allow/deny smoke。共享fixture、client和staging入口 SHALL复用；gomtmui或其他消费者 MUST NOT复制mtmpg native矩阵。
+
 #### Scenario: 领域或真实运行回归
 - **WHEN** JWT、ABI、module加载、OAuth、identity或fail-closed行为偏离规格
-- **THEN** CI SHALL给出对应行为门禁失败并阻止candidate
+- **THEN** CI SHALL给出对应行为门禁失败并阻止release
+
+#### Scenario: 同一风险存在重复矩阵
+- **WHEN** 两个harness完整覆盖同一JWT、profile、role或identity风险而第二个边界没有新增行为
+- **THEN** 测试 SHALL合并到对应单一权威，final-image只保留证明production打包有效的最小smoke
 
 #### Scenario: 上游metadata发生非行为变化
 - **WHEN** 当前PG18 base只改变不影响官方entrypoint、module加载和OAuth行为的metadata、layer或默认环境表示
@@ -110,56 +122,64 @@ Actions SHALL对本次构建的最终image验证实际PostgreSQL属于PG18、官
 
 #### Scenario: Final image只有静态形状正确
 - **WHEN** image文件存在但官方entrypoint、module加载或OAuth行为失败
-- **THEN** candidate发布 SHALL fail closed
+- **THEN** release SHALL fail closed
 
-### Requirement: 成功main commit必须只构建并发布一次SemVer candidate
-只读验证job SHALL从精确`GITHUB_SHA`和本次resolved inputs构建一次production image，验证后物化为可传递OCI archive。只有仓库自身成功`main` push的最小写权限publish job MAY下载该archive并推送公开`ghcr.io/codeh007/mtmpg-postgres`，publish job MUST NOT运行Cargo或Docker build。
+### Requirement: SemVer tag release必须只发布一次已验证image
+只有指向仓库source且符合SemVer的Git tag SHALL触发release；去除前导`v`后的tag version MUST与`Cargo.toml` package version精确一致。只读CI SHALL从该tag的精确source和本次resolved inputs构建一次production image，验证后物化为同一run内可传递OCI archive。
 
-Candidate SHALL使用不可覆盖的mtmpg SemVer prerelease tag。完整OCI digest SHALL在push后记录为证据身份；candidate阶段 MUST NOT创建稳定SemVer、`latest`或stable GitHub Release。
+最小写权限publish job SHALL只下载并推送该已验证archive到公开`ghcr.io/codeh007/mtmpg:<semver>`，MUST NOT运行Cargo、重新解析依赖或执行第二次Docker build。Prerelease SHALL只创建自身version tag和GitHub prerelease；stable SHALL创建自身version tag、stable GitHub Release并更新`latest`。
 
-Candidate的Cargo.lock、resolved inputs、manifest、SBOM、provenance、attestation和checksums SHALL同时发布为同一公开GHCR repository内按candidate SemVer派生的不可覆盖OCI evidence artifact。Actions artifact MAY用于job传递和短期诊断，但consumer与promotion MUST NOT依赖会在同run重试时被删除的Actions artifact。
+目标image version、Git tag和GitHub Release MUST不可覆盖。Actions artifact SHALL只用于同一run内传递archive与release材料，不得作为长期发布权威。
 
-#### Scenario: Main全部门禁成功
-- **WHEN** 精确main commit的resolve、领域、ABI、PG18和final-image验证全部通过
-- **THEN** publish job SHALL推送已验证OCI archive一次，输出SemVer candidate和完整OCI digest
+#### Scenario: SemVer tag全部门禁成功
+- **WHEN** tag version匹配package且resolve、领域、ABI、PG18和final-image验证全部通过
+- **THEN** publish job SHALL推送已验证OCI archive一次，并创建对应version类型的GitHub Release与标准供应链证明
 
-#### Scenario: 发布条件不满足
-- **WHEN** event不是仓库自身`main` push、任一前置job失败或candidate version已经存在
-- **THEN** workflow SHALL不写入GHCR image/evidence、tag、Release或attestation
+#### Scenario: PR或main验证成功
+- **WHEN** 没有SemVer tag的PR或`main` commit通过全部CI门禁
+- **THEN** workflow SHALL不写入GHCR image、GitHub Release或attestation
+
+#### Scenario: Tag或目标version不可发布
+- **WHEN** tag不匹配package version、任一前置job失败或目标image/Release已经存在
+- **THEN** workflow SHALL fail closed且不得覆盖或移动任何既有发布身份
 
 ### Requirement: Release材料必须记录实际制品与输入
-Candidate evidence SHALL包含本次Cargo.lock、`resolved-inputs.json`、release manifest、SBOM、provenance、attestation和checksums，并 SHALL绑定mtmpg SemVer、source SHA、module digest、image OCI digest、evidence OCI digest及实际解析的toolchain/dependency/PostgreSQL/base身份。
+每个GitHub Release SHALL包含本次Cargo.lock、`resolved-inputs.json`、精简release manifest及其checksums；对应OCI image SHALL具有标准SBOM、provenance与GitHub attestation。材料 SHALL绑定mtmpg SemVer、source SHA、module digest、image OCI digest及实际解析的toolchain/dependency/PostgreSQL/base身份。
 
-Evidence MUST描述实际结果，不得把某个上游patch或digest作为下一次构建的预批准输入。Workflow MUST NOT重建image来补写metadata；所有材料 MUST从同一已验证OCI archive生成且不含credential。
+Release材料 MUST描述实际结果，不得把某个上游patch或digest作为下一次构建的预批准输入。Workflow MUST NOT重建image来补写metadata；所有材料 MUST从同一已验证OCI archive生成且不含credential。仓库 MUST NOT发布自定义`<version>.evidence` OCI tag、ORAS evidence bundle或跨仓consumer evidence。
 
-#### Scenario: 生成candidate evidence
-- **WHEN** candidate OCI digest已经产生
-- **THEN** workflow SHALL发布并匿名复验不可覆盖OCI evidence，使SemVer能够无歧义解析到source、lockfile、module、image digest与evidence digest，且后续run重试不能删除该发布证据
+#### Scenario: 生成标准release材料
+- **WHEN** versioned OCI image已经推送并得到registry digest
+- **THEN** workflow SHALL生成并验证GitHub Release assets与标准OCI/GitHub证明，使SemVer能够无歧义解析到source、lockfile、module和image digest
 
 #### Scenario: 供应链身份不一致
 - **WHEN** source、lockfile、module、OCI archive、registry digest、SBOM或attestation任一不匹配
-- **THEN** candidate SHALL标记为不可消费且stable promotion SHALL失败
+- **THEN** release SHALL失败且不得创建或更新`latest`
 
-### Requirement: gomtmui必须按mtmpg版本远端验收
-Gomtmui SHALL在candidate环境中把PostgreSQL image设置为明确的mtmpg SemVer prerelease tag，并通过GitHub Actions解析和记录其完整OCI digest。验收 SHALL覆盖官方initdb/volume/healthcheck、现有TLS与command、sub2api/pgAdmin连接、module加载、真实OAuth登录、`system_user`identity、ACL/RLS和rollback。
+### Requirement: gomtmui必须最小化消费mtmpg release
+Gomtmui SHALL在内测Compose中把PostgreSQL image设置为明确的`ghcr.io/codeh007/mtmpg:<semver>`，并 SHALL复用现有platform初始化、配置与运行契约。Gomtmui MUST NOT本地构建Rust module或mtmpg image，也 MUST NOT增加旧validator、认证fallback、private pull credential或第二份native测试矩阵。
 
-Consumer evidence SHALL绑定mtmpg version/source/manifest/module/OCI digest与gomtmui source。Gomtmui MUST NOT本地构建Rust module或mtmpg image，也 MUST NOT增加旧validator、认证fallback或private pull credential。
+Gomtmui SHALL删除专用mtmpg consumer workflow与测试harness。TLS、sub2api、pgAdmin、ACL/RLS、OAuth issuer和SQL executor的真实集成 SHALL由gomtmui对应领域change在功能启用时验证，不得作为mtmpg release前置条件。平台在pull、启动或备份时 SHALL记录实际resolved digest，但tracked配置 SHALL以mtmpg SemVer表达用户选择。
 
-#### Scenario: Candidate通过gomtmui验收
-- **WHEN** gomtmui远端workflow对版本化candidate完成完整consumer E2E
-- **THEN** evidence SHALL证明实际解析的digest与mtmpg manifest一致，且没有本地Rust构建或认证fallback
+#### Scenario: 更新内测Compose版本
+- **WHEN** gomtmui选择一个已发布mtmpg SemVer用于可重建内测平台
+- **THEN** Compose与platform单一常量 SHALL引用该versioned image，且仓库不得新增专用native consumer workflow或测试目录
 
-#### Scenario: Candidate不兼容现有Compose
-- **WHEN** initdb、volume、TLS、healthcheck、依赖服务、OAuth或rollback矩阵失败
-- **THEN** gomtmui SHALL保持上一已验证mtmpg version，mtmpg SHALL通过新main commit发布新candidate，不得覆盖旧版本
+#### Scenario: 平台领域集成失败
+- **WHEN** gomtmui后续启用TLS、profile role、ACL/RLS或SQL executor时发现与某个mtmpg release不兼容
+- **THEN** gomtmui SHALL在自身领域change中保持该能力停用并修复前进，不得复制mtmpg native矩阵或要求覆盖既有release
 
-### Requirement: Stable发布必须复用已验收candidate
-Stable promotion SHALL只为通过mtmpg gates与gomtmui E2E/rollback的同一OCI digest增加稳定SemVer和`latest`alias，并创建精确source tag和immutable GitHub Release。Promotion MUST NOT运行Cargo、解析新依赖或构建image，也 MUST NOT覆盖既有tag、manifest、asset、Release或image内容。
+### Requirement: Prerelease与stable必须是独立SemVer release
+Prerelease与stable SHALL分别从各自不可变Git tag执行同一完整release门禁。Stable MUST NOT依赖gomtmui consumer evidence或复用某个prerelease digest；若source或解析输入不同，它 SHALL作为新的独立release接受完整测试。只有stable release SHALL更新`latest`。
 
-#### Scenario: 晋级stable
-- **WHEN** native、supply-chain、consumer与rollback证据全部绑定同一candidate version和digest
-- **THEN** promotion SHALL发布同一digest的稳定mtmpg SemVer及其manifest、lockfile、SBOM、provenance、checksums和consumer evidence
+#### Scenario: 发布prerelease
+- **WHEN** `v0.1.0-rc.1`等合法prerelease tag通过完整门禁
+- **THEN** workflow SHALL发布对应versioned image与GitHub prerelease，且不得更新`latest`
 
-#### Scenario: Promotion尝试重建或覆盖
-- **WHEN** stable workflow运行Cargo/Docker build、重新解析上游或发现目标SemVer已经存在
-- **THEN** 发布 SHALL失败并要求新main commit产生新candidate重新验收
+#### Scenario: 发布stable
+- **WHEN** `v0.1.0`等合法stable tag通过完整门禁
+- **THEN** workflow SHALL发布该stable version、GitHub Release与标准供应链材料，并把`latest`更新为该release的digest
+
+#### Scenario: 失败tag需要修复
+- **WHEN** tag release任一门禁失败或写入后形成没有完整Release的孤立version
+- **THEN** 原tag MUST NOT移动或重用，维护者 SHALL修复源码、提升SemVer并精确清理孤立version后重新发布

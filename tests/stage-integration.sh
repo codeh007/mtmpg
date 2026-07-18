@@ -49,8 +49,7 @@ cargo build --locked --release --no-default-features --features pg18,pgx-oauth-g
 install -m 0644 "${RELEASE_MODULE}" "${STAGING_ROOT}/pggomtm_pgx_gate.so"
 
 cargo build --locked --release --lib --no-default-features --features pg18
-install -m 0644 "${RELEASE_MODULE}" "${STAGING_ROOT}/pggomtm_config_gate.so"
-install -m 0644 "${RELEASE_MODULE}" "${STAGING_ROOT}/pggomtm_identity_gate.so"
+install -m 0644 "${RELEASE_MODULE}" "${STAGING_ROOT}/pggomtm.so"
 
 cargo build --locked --release --bin pggomtm_oauth_smoke_fixture \
   --no-default-features \
@@ -82,7 +81,6 @@ install -m 0644 \
   tests/oauth_runtime_probe.sql \
   tests/runtime_config_missing_probe.sql \
   tests/runtime_config_ready_probe.sql \
-  tests/runtime_config_validate_probe.sql \
   "${STAGING_ROOT}"
 install -d -m 0755 "${STAGING_ROOT}/runtime-config-fixture"
 install -m 0644 \

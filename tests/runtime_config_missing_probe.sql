@@ -10,4 +10,4 @@ RETURNS boolean
 AS '$libdir/pggomtm_abi_runtime_probe', 'pggomtm_config_snapshot_probe'
 LANGUAGE C STRICT;
 
-SELECT pggomtm_config_missing_probe('$libdir/pggomtm_config_gate');
+SELECT pggomtm_config_missing_probe('$libdir/pggomtm');

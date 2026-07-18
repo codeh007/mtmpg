@@ -36,15 +36,13 @@ validate_artifacts() {
   for artifact in \
     pggomtm_abi_gate.so \
     pggomtm_abi_runtime_probe.so \
-    pggomtm_config_gate.so \
+    pggomtm.so \
     pggomtm_pgx_gate.so \
-    pggomtm_identity_gate.so \
     pggomtm_oauth_smoke_client \
     pggomtm_oauth_smoke_fixture \
     oauth_runtime_probe.sql \
     runtime_config_missing_probe.sql \
     runtime_config_ready_probe.sql \
-    runtime_config_validate_probe.sql \
     runtime-config-fixture/validator.json \
     runtime-config-fixture/jwks.json; do
     if test ! -f "${artifact_root}/${artifact}" || test -L "${artifact_root}/${artifact}"; then

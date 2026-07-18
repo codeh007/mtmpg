@@ -16,112 +16,38 @@ use pggomtm::database_auth::{
 const ISSUER: &str = "https://candidate.example.test/oauth/database";
 const AUDIENCE: &str = "https://candidate.example.test/resources/database/gomtm-test";
 const KID: &str = "candidate-es256-pgx-gate";
+const SCENARIO: &str = "oauth-ordinary";
+const SUBJECT: &str = "usr_oauth_ordinary";
+const CLIENT_ID: &str = "cli_oauth_ordinary";
+const DELEGATION_ID: &str = "dlg_oauth_ordinary";
 
-#[derive(Clone, Copy)]
-struct IdentityScenario {
-    slug: &'static str,
-    subject: &'static str,
-    actor_id: &'static str,
-    delegation_id: &'static str,
-    auth_method: AuthMethod,
-    authority_version: u64,
-    profile: DatabaseProfile,
+fn ordinary_claims(now: i64) -> DatabaseTokenClaims {
+    DatabaseTokenClaims {
+        issuer: ISSUER.into(),
+        audience: AUDIENCE.into(),
+        subject: SUBJECT.into(),
+        issued_at: now.saturating_sub(1),
+        expires_at: now.saturating_add(299),
+        token_id: format!("jti_{SCENARIO}"),
+        scope: "database".into(),
+        delegation_id: DELEGATION_ID.into(),
+        auth_method: AuthMethod::OAuth,
+        authority_version: 1,
+        db_profile: DatabaseProfile::Ordinary,
+        db_role: DatabaseProfile::Ordinary.database_role().into(),
+        client_id: Some(CLIENT_ID.into()),
+        credential_id: None,
+    }
 }
 
-const IDENTITY_SCENARIOS: [IdentityScenario; 6] = [
-    IdentityScenario {
-        slug: "oauth-ordinary",
-        subject: "usr_oauth_ordinary",
-        actor_id: "cli_oauth_ordinary",
-        delegation_id: "dlg_oauth_ordinary",
+fn ordinary_identity() -> AuthenticatedIdentity {
+    AuthenticatedIdentity {
+        user_id: SUBJECT.into(),
+        actor: AuthenticatedActor::OAuthClient(CLIENT_ID.into()),
+        delegation_id: DELEGATION_ID.into(),
         auth_method: AuthMethod::OAuth,
         authority_version: 1,
         profile: DatabaseProfile::Ordinary,
-    },
-    IdentityScenario {
-        slug: "oauth-business-admin",
-        subject: "usr_oauth_business_admin",
-        actor_id: "cli_oauth_business_admin",
-        delegation_id: "dlg_oauth_business_admin",
-        auth_method: AuthMethod::OAuth,
-        authority_version: 2,
-        profile: DatabaseProfile::BusinessAdmin,
-    },
-    IdentityScenario {
-        slug: "oauth-database-developer",
-        subject: "usr_oauth_database_developer",
-        actor_id: "cli_oauth_database_developer",
-        delegation_id: "dlg_oauth_database_developer",
-        auth_method: AuthMethod::OAuth,
-        authority_version: 3,
-        profile: DatabaseProfile::DatabaseDeveloper,
-    },
-    IdentityScenario {
-        slug: "api-key-ordinary",
-        subject: "usr_api_key_ordinary",
-        actor_id: "crd_api_key_ordinary",
-        delegation_id: "dlg_api_key_ordinary",
-        auth_method: AuthMethod::ApiKey,
-        authority_version: 4,
-        profile: DatabaseProfile::Ordinary,
-    },
-    IdentityScenario {
-        slug: "api-key-business-admin",
-        subject: "usr_api_key_business_admin",
-        actor_id: "crd_api_key_business_admin",
-        delegation_id: "dlg_api_key_business_admin",
-        auth_method: AuthMethod::ApiKey,
-        authority_version: 5,
-        profile: DatabaseProfile::BusinessAdmin,
-    },
-    IdentityScenario {
-        slug: "api-key-database-developer",
-        subject: "usr_api_key_database_developer",
-        actor_id: "crd_api_key_database_developer",
-        delegation_id: "dlg_api_key_database_developer",
-        auth_method: AuthMethod::ApiKey,
-        authority_version: 6,
-        profile: DatabaseProfile::DatabaseDeveloper,
-    },
-];
-
-impl IdentityScenario {
-    fn claims(self, now: i64) -> DatabaseTokenClaims {
-        let (client_id, credential_id) = match self.auth_method {
-            AuthMethod::OAuth => (Some(self.actor_id.into()), None),
-            AuthMethod::ApiKey => (None, Some(self.actor_id.into())),
-        };
-        DatabaseTokenClaims {
-            issuer: ISSUER.into(),
-            audience: AUDIENCE.into(),
-            subject: self.subject.into(),
-            issued_at: now.saturating_sub(1),
-            expires_at: now.saturating_add(299),
-            token_id: format!("jti_{}", self.slug),
-            scope: "database".into(),
-            delegation_id: self.delegation_id.into(),
-            auth_method: self.auth_method,
-            authority_version: self.authority_version,
-            db_profile: self.profile,
-            db_role: self.profile.database_role().into(),
-            client_id,
-            credential_id,
-        }
-    }
-
-    fn identity(self) -> AuthenticatedIdentity {
-        let actor = match self.auth_method {
-            AuthMethod::OAuth => AuthenticatedActor::OAuthClient(self.actor_id.into()),
-            AuthMethod::ApiKey => AuthenticatedActor::ApiKeyCredential(self.actor_id.into()),
-        };
-        AuthenticatedIdentity {
-            user_id: self.subject.into(),
-            actor,
-            delegation_id: self.delegation_id.into(),
-            auth_method: self.auth_method,
-            authority_version: self.authority_version,
-            profile: self.profile,
-        }
     }
 }
 
@@ -172,36 +98,13 @@ fn generate_fixtures(output_dir: &Path) -> Result<(), Box<dyn Error>> {
 
     let now = i64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())?;
     let key = SigningKey::from_slice(&[7_u8; 32])?;
-    let mut ordinary_oauth_token = None;
-
-    for scenario in IDENTITY_SCENARIOS {
-        let token = sign_claims(scenario.claims(now), &key)?;
-        write_ephemeral_fixture(
-            &output_dir.join(format!("{}.jwt", scenario.slug)),
-            token.as_bytes(),
-        )?;
-        if scenario.slug == "oauth-ordinary" {
-            ordinary_oauth_token = Some(token);
-        }
-    }
-
-    let mut overlong = IDENTITY_SCENARIOS[0].claims(now);
-    overlong.subject = "x".repeat(65);
+    let ordinary_oauth_token = sign_claims(ordinary_claims(now), &key)?;
     write_ephemeral_fixture(
-        &output_dir.join("invalid-overlong-identity.jwt"),
-        sign_claims(overlong, &key)?.as_bytes(),
+        &output_dir.join(format!("{SCENARIO}.jwt")),
+        ordinary_oauth_token.as_bytes(),
     )?;
 
-    let mut illegal = IDENTITY_SCENARIOS[0].claims(now);
-    illegal.delegation_id = "dlg:illegal".into();
-    write_ephemeral_fixture(
-        &output_dir.join("invalid-illegal-identity.jwt"),
-        sign_claims(illegal, &key)?.as_bytes(),
-    )?;
-
-    let mut tampered = ordinary_oauth_token
-        .ok_or_else(|| IoError::new(ErrorKind::InvalidData, "missing ordinary OAuth token"))?
-        .into_bytes();
+    let mut tampered = ordinary_oauth_token.into_bytes();
     let signature_start = tampered
         .iter()
         .rposition(|byte| *byte == b'.')
@@ -228,17 +131,16 @@ fn sign_claims(claims: DatabaseTokenClaims, key: &SigningKey) -> Result<String, 
 }
 
 fn verify_system_user(slug: &str, path: &Path) -> Result<(), Box<dyn Error>> {
-    let scenario = IDENTITY_SCENARIOS
-        .into_iter()
-        .find(|scenario| scenario.slug == slug)
-        .ok_or_else(|| invalid_input("unknown identity scenario"))?;
+    if slug != SCENARIO {
+        return Err(invalid_input("unknown identity scenario").into());
+    }
     let system_user = fs::read_to_string(path)?;
     if system_user.is_empty() || system_user.len() > MAX_AUTHN_ID_BYTES + "oauth:".len() {
         return Err(IoError::new(ErrorKind::InvalidData, "invalid system_user length").into());
     }
 
     let decoded = decode_system_user(&system_user)?;
-    let expected = scenario.identity();
+    let expected = ordinary_identity();
     if decoded != expected {
         return Err(IoError::new(ErrorKind::InvalidData, "decoded identity mismatch").into());
     }

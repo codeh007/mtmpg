@@ -44,7 +44,7 @@ const ABI_RUNTIME_ERROR_SENTINEL: usize = 2;
 const PGX_OAUTH_GATE_JWKS: &str = r#"{"keys":[{"kty":"EC","crv":"P-256","alg":"ES256","use":"sig","key_ops":["verify"],"kid":"candidate-es256-pgx-gate","x":"HhhTL9R1TALzBB2cdc6zO4P_2BrHzk_ogsyxyYvFiW4","y":"pGwxHE4v9A3ZajZT5uRURdMt_khuztdcepDGoYiBwKM"}]}"#;
 
 #[cfg(feature = "pgx-oauth-gate")]
-pub fn verify_pgx_gate_token(
+fn verify_pgx_gate_token(
     token: &str,
     requested_role: &str,
     now: i64,

@@ -1,14 +1,15 @@
 ## 当前基线
 
-`pggomtm` 的OAuth validator主路径已经实现，完整源码已非force进入远端`main`，临时功能分支已删除。旧固定PG18.4/digest方案的Rust、ABI、Cargo、真实PostgreSQL integration和image build曾在远端通过，但final-image gate因比较Docker config失败；该结果不完成本次latest-compatible精简方案。
+`pggomtm` 的OAuth validator主路径已经实现，完整源码已非force进入远端`main`，临时功能分支已删除。Latest-compatible领域、ABI、真实PostgreSQL、final-image及旧candidate/evidence已由run`29646533596`完整通过，但该run使用已废弃的`mtmpg-postgres`名称、run-ID prerelease和定制OCI evidence，只作为重构基线，不完成新的标准SemVer release任务。
 
-任何本地Docker build/run、原生编译、临时PostgreSQL或image检查结果都不能完成以下任务。`main`验证失败时保留源码并通过后续commit修复，上一candidate/stable保持不变。
+任何本地Docker build/run、原生编译、临时PostgreSQL或image检查结果都不能完成以下任务。`main`验证失败时保留源码并通过后续commit修复；没有显式SemVer tag时不得发布image。
 
 ## 1. Main与规划基线
 
 - [x] 1.1 将`issue-116-extract-pggomtm`非force fast-forward到远端`main`，把本地工作线切换到同一main，删除workflow临时分支trigger及本地/远端临时分支
 - [x] 1.2 确立main-first、Actions-only边界，精确清理旧本地诊断container/image且不执行宽泛prune
 - [x] 1.3 按gomtmui #116评论5010761180重写proposal、design、两份delta spec和tasks，并通过严格OpenSpec校验
+- [x] 1.4 按gomtmui #116评论5011465794将规划收敛为可复用只读CI、SemVer tag release、`ghcr.io/codeh007/mtmpg`和最小gomtmui消费，并通过严格OpenSpec校验
 
 ## 2. 仓库文件与文档精简
 
@@ -38,39 +39,38 @@
 - [x] 4.6 删除现有复杂`scripts/`入口；将Cargo编排交给workflow、secret scan交给标准Action、PG/image harness放入`tests/`，只在确有多处复用时保留小型单职责入口
 - [x] 4.7 建立精简final-image检查，验证官方entrypoint/initdb、PG18、真实`pkglibdir`、module加载、动态依赖、OAuth smoke及无private/test material
 
-## 5. 单次解析与只读Native CI
+## 5. Latest-compatible核心门禁基线
 
 - [x] 5.1 增加resolve step，生成一次临时Cargo.lock、解析builder/runtime完整digest并输出`resolved-inputs.json`
 - [x] 5.2 让fmt、Clippy、Cargo tests、ABI、production module和PG18 integration复用同一lockfile、minor和解析结果，检测任何job漂移
 - [x] 5.3 用标准source/secret和dependency/license检查替代自定义历史collector及其自测，保持PR/fork lane完全只读
 - [x] 5.4 从同一resolved inputs只构建一次production image，完成final-image验证后物化可传递OCI archive及module identity
-- [x] 5.5 上传已验证OCI archive、Cargo.lock、resolved inputs和只读测试结果供后续publish job使用，验证artifact与source绑定
-- [x] 5.6 将精简实现直接提交到`main`，只依据精确SHA的远端Actions日志前进修复，取得resolve、领域、ABI、PG18和final-image完整成功结果
+- [x] 5.5 将精简实现直接提交到`main`，只依据精确SHA的远端Actions日志前进修复，并由run`29646533596`取得resolve、领域、ABI、PG18和final-image完整成功基线
 
-## 6. SemVer Candidate与供应链证据
+## 6. 测试去重与标准CI
 
-- [x] 6.1 从Cargo package/release输入生成不可覆盖的mtmpg SemVer prerelease candidate，并验证版本、source和workflow run唯一
-- [x] 6.2 增加仅对仓库自身成功`main` push生效的最小写权限publish job，下载并推送已验证OCI archive且不运行Cargo或Docker build
-- [x] 6.3 推送公开`ghcr.io/codeh007/mtmpg-postgres:<semver-prerelease>`，记录registry返回的完整OCI digest并拒绝覆盖既有version
-- [ ] 6.4 生成release manifest，绑定mtmpg version、source、Cargo.lock、resolved inputs、PG18、module、OCI archive和registry digest，并发布不可覆盖OCI evidence引用
-- [ ] 6.5 为同一candidate生成并验证SBOM、provenance、attestation和checksums，匿名拉回OCI evidence复验，确认材料不依赖会被run重试删除的Actions artifact
-- [x] 6.6 验证GHCR匿名公开读取，并证明失败main、PR、fork和重复version无法取得package、Release或attestation写入结果
+- [x] 6.1 将Rust领域、真实PG18与final-image现有测试逐项映射到风险边界，识别完整JWT/profile/role/identity矩阵和fixture/client/staging的重复定义
+- [x] 6.2 合并重复矩阵与support入口，保留单一Rust领域权威、单一真实PG18 backend harness和最小final-image allow/deny smoke
+- [x] 6.3 用支持`pull_request`、`main` push与`workflow_call`的可复用只读`ci.yml`替代复杂`native-ci.yml`，移除candidate、ORAS evidence和跨仓consumer逻辑
+- [x] 6.4 让可复用CI在release调用时上传同一run已验证OCI archive、Cargo.lock、resolved inputs与manifest输入，并证明后续publish无需重新运行Cargo或Docker build
+- [ ] 6.5 配置required CI与GitHub原生auto-merge，只允许owner、Agent或批准的Dependabot PR自动合并，外部PR保持人工批准且维护者/Agent可直接非force推进`main`
+- [ ] 6.6 取得PR与`main`的精确远端成功run，证明两者没有packages、Release、attestation或跨仓写权限，并更新README/维护文档的CI入口
 
-## 7. Gomtmui远端消费验收
+## 7. 首个标准SemVer prerelease
 
-- [ ] 7.1 在gomtmui把`docker-compose.yml`的PostgreSQL image改为明确mtmpg SemVer prerelease tag，不改变既有volume、TLS、healthcheck、environment和command
-- [ ] 7.2 在gomtmui Actions拉取candidate version，解析实际OCI digest并验证与mtmpg manifest、module和source一致
-- [ ] 7.3 远端验证官方initdb、volume、healthcheck和PG18启动语义，确认最终image没有本地Rust build或fallback
-- [ ] 7.4 远端验证现有TLS、sub2api与pgAdmin连接，以及production module从真实`pkglibdir`加载
-- [ ] 7.5 远端完成真实database JWT OAuth allow/deny、三类profile、requested role和`system_user`identity矩阵
-- [ ] 7.6 远端完成ordinary/business-admin/database-developer的ACL/RLS正负矩阵，确认认证成功不绕过数据库授权
-- [ ] 7.7 切回上一已验证mtmpg version完成rollback，并产出绑定mtmpg version/source/manifest/module/OCI digest与gomtmui source的consumer evidence
-- [ ] 7.8 完成7.7后在gomtmui #116/#117回填阶段性结果，记录candidate version、实际digest、Actions run、真实验收、rollback和未完成stable事项
+- [ ] 7.1 将Cargo package version设为首个合法prerelease（`0.1.0-rc.1`），并要求去除前导`v`后的Git tag与package version精确一致
+- [ ] 7.2 增加只由合法SemVer tag触发的`release.yml`，调用可复用CI并以最小写权限下载和推送同一已验证OCI archive
+- [ ] 7.3 发布公开`ghcr.io/codeh007/mtmpg:0.1.0-rc.1`与GitHub prerelease，拒绝既有version、错误source、失败门禁和任何`latest`更新
+- [ ] 7.4 生成精简release manifest、Cargo.lock、resolved inputs与checksums作为Release assets，并为同一image digest生成标准SBOM、provenance和GitHub attestation
+- [ ] 7.5 匿名拉取versioned image，复验source/version label、module/registry digest、Release assets和attestation，证明Actions artifact不是长期消费权威
+- [ ] 7.6 在新命名prerelease完整可读后精确退役`mtmpg-postgres`旧阶段性package versions与孤立attestation referrer，保留Git、Actions run和Issue历史
+- [ ] 7.7 更新README、release/compatibility与维护文档，只描述PR/main CI、SemVer tag release、`ghcr.io/codeh007/mtmpg`和标准供应链材料，并完成聚焦检查与严格OpenSpec校验
+- [ ] 7.8 完成7.7后在mtmpg #1与gomtmui #116/#117回填阶段性结果，记录prerelease、source、OCI digest、Actions run、Release/attestation和未完成stable事项
 
-## 8. Same-digest Stable发布
+## 8. 独立Stable发布与收尾
 
-- [ ] 8.1 建立promotion workflow，只接受已通过mtmpg与gomtmui证据的candidate version/digest，且不得重新解析依赖或构建module/image
-- [ ] 8.2 为同一digest增加稳定mtmpg SemVer与`latest`alias，创建精确source tag和immutable GitHub Release，并拒绝覆盖任何既有发布身份
-- [ ] 8.3 验证stable tag、Release assets、Cargo.lock、resolved inputs、manifest、checksums、SBOM、attestation和consumer evidence全部指向同一OCI/module digest
-- [ ] 8.4 在gomtmui把已验收prerelease更新为稳定mtmpg SemVer，确认解析digest不变并完成远端启动smoke
-- [ ] 8.5 回填mtmpg #1与gomtmui #116/#117最终结果，记录稳定version、source、OCI digest、供应链材料、消费证据、rollback和已知限制
+- [ ] 8.1 将Cargo package version提升为首个stable SemVer并创建对应不可变Git tag，由同一release流程重新解析、完整测试、构建和发布独立stable制品
+- [ ] 8.2 发布`ghcr.io/codeh007/mtmpg:<stable>`、stable GitHub Release和标准供应链材料，只在全部成功后把`latest`更新为该stable digest
+- [ ] 8.3 复验stable version、source、manifest、Cargo.lock、resolved inputs、module/image digest、Release assets、SBOM、provenance、attestation与`latest`一致且没有覆盖prerelease
+- [ ] 8.4 同步确认gomtmui companion OpenSpec只按SemVer消费新image、没有专用native consumer harness或mtmpg release前置的跨仓E2E
+- [ ] 8.5 运行全部远端领域、ABI、真实PG18、final-image、release与严格OpenSpec门禁，回填mtmpg #1和gomtmui #116/#117最终结果与已知限制
