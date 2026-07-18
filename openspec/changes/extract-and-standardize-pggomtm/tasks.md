@@ -73,4 +73,4 @@
 - [x] 8.2 发布`ghcr.io/codeh007/mtmpg:<stable>`、stable GitHub Release和标准供应链材料，只在全部成功后把`latest`更新为该stable digest
 - [x] 8.3 复验stable version、source、manifest、Cargo.lock、resolved inputs、module/image digest、Release assets、SBOM、provenance、attestation与`latest`一致且没有覆盖prerelease
 - [x] 8.4 同步确认gomtmui companion OpenSpec只按SemVer消费新image、没有专用native consumer harness或mtmpg release前置的跨仓E2E
-- [ ] 8.5 运行全部远端领域、ABI、真实PG18、final-image、release与严格OpenSpec门禁，回填mtmpg #1和gomtmui #116/#117最终结果与已知限制
+- [x] 8.5 运行全部远端领域、ABI、真实PG18、final-image、release与严格OpenSpec门禁，回填mtmpg #1和gomtmui #116/#117最终结果与已知限制
