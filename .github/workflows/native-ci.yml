@@ -365,17 +365,6 @@ jobs:
             echo "REGISTRY_DIGEST=$registry_digest"
           } >>"$GITHUB_ENV"
 
-      - name: Make the GHCR package public
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh api \
-            --method PATCH \
-            /user/packages/container/mtmpg-postgres \
-            -f visibility=public >/dev/null
-
       - name: Download current Syft
         id: syft
         uses: anchore/sbom-action/download-syft@v0
