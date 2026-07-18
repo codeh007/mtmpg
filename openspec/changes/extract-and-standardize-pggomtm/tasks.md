@@ -53,7 +53,7 @@
 - [x] 6.2 合并重复矩阵与support入口，保留单一Rust领域权威、单一真实PG18 backend harness和最小final-image allow/deny smoke
 - [x] 6.3 用支持`pull_request`、`main` push与`workflow_call`的可复用只读`ci.yml`替代复杂`native-ci.yml`，移除candidate、ORAS evidence和跨仓consumer逻辑
 - [x] 6.4 让可复用CI在release调用时上传同一run已验证OCI archive、Cargo.lock、resolved inputs与manifest输入，并证明后续publish无需重新运行Cargo或Docker build
-- [ ] 6.5 配置required CI与GitHub原生auto-merge，只允许owner、Agent或批准的Dependabot PR自动合并，外部PR保持人工批准且维护者/Agent可直接非force推进`main`
+- [x] 6.5 配置required CI与GitHub原生auto-merge，只允许owner、Agent或批准的Dependabot PR自动合并，外部PR保持人工批准且维护者/Agent可直接非force推进`main`
 - [ ] 6.6 取得PR与`main`的精确远端成功run，证明两者没有packages、Release、attestation或跨仓写权限，并更新README/维护文档的CI入口
 
 ## 7. 首个标准SemVer prerelease

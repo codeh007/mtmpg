@@ -9,6 +9,7 @@
 - 所有Cargo、PostgreSQL和Docker重计算只在GitHub Actions执行。
 - 维护者和Agent可以直接非force推进`main`；失败commit保留并由后续commit修复。
 - Pull Request是可选外部贡献入口，始终只读且不得获得package、Release或attestation写权限。
+- `Verify`是`main`的required check。只有具备write权限的owner或Agent可以启用GitHub原生auto-merge；Dependabot PR经维护者确认后可以启用，外部贡献者PR必须由维护者人工决定且workflow不得自行合并。
 
 ## 依赖与兼容审查
 

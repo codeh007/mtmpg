@@ -24,7 +24,7 @@
 
 ## GitHub Actions
 
-`.github/workflows/native-ci.yml`负责依赖解析、Rustfmt、Clippy、Cargo tests、C/Rust ABI、真实 PG18 OAuth、production module 和最终 image 验证。根 `Dockerfile` 只构建 production image，不承载测试或扫描器。
+`.github/workflows/ci.yml`是 PR、`main` push 与 release 调用复用的验证入口，负责依赖解析、Rustfmt、Clippy、Cargo tests、C/Rust ABI、真实 PG18 OAuth、production module 和最终 image。PR 与`main`只读运行且不上传release材料；只有SemVer tag workflow调用时才短暂传递同一run已验证的OCI archive。根`Dockerfile`只构建production image，不承载测试或扫描器。
 
 维护者和 Agent 可以把范围明确的 commit 直接非 force 推送到 `main`。失败 commit 保留并通过后续 commit 修复；失败 run 不得发布 candidate 或 stable。
 
@@ -33,7 +33,7 @@
 查询远端结果：
 
 ```bash
-gh run list --repo codeh007/mtmpg --workflow native-ci.yml --branch main --limit 5
+gh run list --repo codeh007/mtmpg --workflow ci.yml --branch main --limit 5
 gh run view <run-id> --repo codeh007/mtmpg --log-failed
 ```
 
