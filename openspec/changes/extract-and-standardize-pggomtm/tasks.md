@@ -53,7 +53,7 @@
 - [x] 7.1 在远端功能ref建立feature push/PR Native CI bootstrap：只用full-SHA批准actions、read-only token、无secret/无GHCR登录、同ref并发取消和BuildKit GitHub Actions cache运行唯一Docker build graph，并用精确remote HEAD的成功run替代本地完整Docker结果
 - [x] 7.2 增加Cargo dependency、RustSec与license审计，对完整pgrx transitive advisory逐项记录理由和复核期限，不使用全局ignore或自动放宽
 - [x] 7.3 实现默认redact的追溯式public-readiness门禁，覆盖全部refs/history、tracked/uncommitted文件、Docker context、workflow源码/log、Actions artifact/cache、GitHub Issue/PR和candidate image；合成fixture只允许精确路径/模式/理由分类
-- [ ] 7.4 增加动态链接、ELF export、arch/libc、module位置、官方entrypoint、image filesystem与build-manifest门禁，证明candidate/stable image只增加正式`.so`、MIT license和不含自身OCI digest的公开build metadata
+- [x] 7.4 增加动态链接、ELF export、arch/libc、module位置、官方entrypoint、image filesystem与build-manifest门禁，证明candidate/stable image只增加正式`.so`、MIT license和不含自身OCI digest的公开build metadata
 - [ ] 7.5 同步README、SECURITY、CONTRIBUTING、MAINTAINERS、AGENTS、GitHub治理与release文档到public、development-main、Agent auto-merge和公开GHCR语义；在mtmpg创建后续release跟踪Issue并反向链接gomtmui #116/#117
 - [ ] 7.6 在当前公开远端执行完整追溯扫描；真实secret命中时先吊销或轮换并经批准处置history/remote，只有重扫通过后才继续，且不得通过重新设为private或删除日志冒充处置
 - [ ] 7.7 删除全部无法逐项证明安全的公开前GitHub Actions/BuildKit cache，从clean checkout对最终remote HEAD运行一次无secret、无缓存bootstrap cold build，记录source、run、image和脱敏finding摘要
