@@ -144,11 +144,18 @@ if grep --quiet --fixed-strings "${INLINE_TOKEN}" \
   fail "scanner output disclosed the inline-allow sentinel"
 fi
 
+PUBLIC_HEADER_DIGEST="$(
+  printf '%s%s' \
+    'be015ae68deef28a906c8739bc653ca9' \
+    '0a4c6966c10f0efd3bd926efb4958bcf'
+)"
+readonly PUBLIC_HEADER_DIGEST
 readonly APPROVED_DIGEST_ROOT="${TEMP_ROOT}/approved-public-digest"
 initialize_repository "${APPROVED_DIGEST_ROOT}"
 install -d "${APPROVED_DIGEST_ROOT}/scripts"
-printf '%s\n' \
-  'readonly OAUTH_HEADER_SHA256="be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bcf"' \
+printf 'readonly %s="%s"\n' \
+  OAUTH_HEADER_SHA256 \
+  "${PUBLIC_HEADER_DIGEST}" \
   >"${APPROVED_DIGEST_ROOT}/scripts/native-test"
 git -C "${APPROVED_DIGEST_ROOT}" add scripts/native-test
 git -C "${APPROVED_DIGEST_ROOT}" commit --quiet --message "test: add public header digest"
@@ -158,8 +165,9 @@ git -C "${APPROVED_DIGEST_ROOT}" commit --quiet --message "test: add public head
 readonly WRONG_DIGEST_PATH_ROOT="${TEMP_ROOT}/wrong-public-digest-path"
 initialize_repository "${WRONG_DIGEST_PATH_ROOT}"
 install -d "${WRONG_DIGEST_PATH_ROOT}/scripts/native-test-copy"
-printf '%s\n' \
-  'readonly OAUTH_HEADER_SHA256="be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bcf"' \
+printf 'readonly %s="%s"\n' \
+  OAUTH_HEADER_SHA256 \
+  "${PUBLIC_HEADER_DIGEST}" \
   >"${WRONG_DIGEST_PATH_ROOT}/scripts/native-test-copy/config"
 git -C "${WRONG_DIGEST_PATH_ROOT}" add scripts/native-test-copy/config
 git -C "${WRONG_DIGEST_PATH_ROOT}" commit --quiet --message "test: move public header digest"
@@ -172,8 +180,9 @@ assert_redacted "${TEMP_ROOT}/wrong-public-digest-path.out"
 readonly WRONG_DIGEST_VALUE_ROOT="${TEMP_ROOT}/wrong-public-digest-value"
 initialize_repository "${WRONG_DIGEST_VALUE_ROOT}"
 install -d "${WRONG_DIGEST_VALUE_ROOT}/scripts"
-printf '%s\n' \
-  'readonly OAUTH_HEADER_SHA256="be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bca"' \
+printf 'readonly %s="%s"\n' \
+  OAUTH_HEADER_SHA256 \
+  "${PUBLIC_HEADER_DIGEST%?}a" \
   >"${WRONG_DIGEST_VALUE_ROOT}/scripts/native-test"
 git -C "${WRONG_DIGEST_VALUE_ROOT}" add scripts/native-test
 git -C "${WRONG_DIGEST_VALUE_ROOT}" commit --quiet --message "test: change public header digest"

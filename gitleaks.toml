@@ -27,3 +27,12 @@ targetRules = ["generic-api-key"]
 regexTarget = "match"
 paths = ['''(?:^|/)scripts/native-test$''']
 regexes = ['''OAUTH_HEADER_SHA256\s*=\s*"be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bcf"''']
+
+[[allowlists]]
+description = "Immutable historical public-readiness fixture literals; both values are synthetic and scoped to the introducing commit."
+condition = "AND"
+targetRules = ["generic-api-key"]
+commits = ["7bc8b55598602e589dbfd9a7c22e6de4be4d61bf"]
+regexTarget = "match"
+paths = ['''^tests/public_readiness_gate\.sh$''']
+regexes = ['''OAUTH_HEADER_SHA256\s*=\s*"(?:be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bcf|be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bca)"''']
