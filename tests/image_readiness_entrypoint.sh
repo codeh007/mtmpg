@@ -55,8 +55,8 @@ grep --quiet --fixed-strings -- 'source revision must be a full lowercase Git co
   "${TEMP_ROOT}/invalid.out" || fail "entrypoint returned an unstable validation error"
 
 for required in \
-  '$official.Config == $image.Config' \
-  '(($base_layers | length) + 3)' \
+  "\$official.Config == \$image.Config" \
+  "((\$base_layers | length) + 3)" \
   'verify-filesystem' \
   'verify-elf' \
   'verify-image' \
