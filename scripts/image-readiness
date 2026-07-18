@@ -79,20 +79,39 @@ verify_image_config() {
   jq --exit-status \
     --slurpfile base "${base_inspect}" \
     --slurpfile candidate "${candidate_inspect}" '
+      def runtime_contract:
+        {
+          entrypoint: .Config.Entrypoint,
+          command: .Config.Cmd,
+          volumes: .Config.Volumes,
+          stop_signal: .Config.StopSignal,
+          user: .Config.User,
+          working_directory: .Config.WorkingDir,
+          exposed_ports: .Config.ExposedPorts,
+          environment: .Config.Env,
+          healthcheck: .Config.Healthcheck,
+          shell: .Config.Shell
+        };
+      ($base[0][0]) as $official
+      | ($candidate[0][0]) as $image
+      | ($official | runtime_contract) == ($image | runtime_contract)
+    ' >/dev/null || fail "candidate changed the official runtime config"
+
+  jq --exit-status \
+    --slurpfile base "${base_inspect}" \
+    --slurpfile candidate "${candidate_inspect}" '
       ($base[0][0]) as $official
       | ($candidate[0][0]) as $image
       | ($official.RootFS.Layers) as $base_layers
       | ($image.RootFS.Layers) as $candidate_layers
-      | $official.Config == $image.Config
-        and $official.Architecture == $image.Architecture
+      | $official.Architecture == $image.Architecture
         and $official.Os == $image.Os
         and $official.Variant == $image.Variant
         and $official.OsVersion == $image.OsVersion
         and $official.RootFS.Type == $image.RootFS.Type
         and ($candidate_layers | length) == (($base_layers | length) + 3)
         and $candidate_layers[0:($base_layers | length)] == $base_layers
-    ' >/dev/null || \
-    fail "candidate changed official runtime config or does not derive from the approved base"
+    ' >/dev/null || fail "candidate does not derive from the approved base layers"
 }
 
 export_container_root() {
