@@ -35,6 +35,7 @@ cleanup() {
   if test -n "${RUNTIME_CONTAINER}"; then
     "${DOCKER_BIN}" rm --force "${RUNTIME_CONTAINER}" >/dev/null 2>&1 || true
   fi
+  chmod -R u+w -- "${SESSION_ROOT}" 2>/dev/null || true
   rm -rf -- "${SESSION_ROOT}"
 }
 trap cleanup EXIT INT TERM
@@ -110,7 +111,6 @@ chmod 0555 "${SESSION_ROOT}/init.sh"
 RUNTIME_CONTAINER="pggomtm-image-${GITHUB_RUN_ID:-ci}-$$"
 "${DOCKER_BIN}" run \
   --detach \
-  --rm \
   --name "${RUNTIME_CONTAINER}" \
   --platform linux/amd64 \
   --env POSTGRES_HOST_AUTH_METHOD=trust \
@@ -162,5 +162,6 @@ test "$(
   gomtm_candidate_ordinary
 
 "${DOCKER_BIN}" stop --time 10 "${RUNTIME_CONTAINER}" >/dev/null
+"${DOCKER_BIN}" rm "${RUNTIME_CONTAINER}" >/dev/null
 RUNTIME_CONTAINER=""
 printf 'final PG18 image behavior passed: %s\n' "${IMAGE}"
