@@ -1,14 +1,14 @@
 # 为 pggomtm 贡献变更
 
-本页说明如何限定变更范围、运行 locked Rust 与 Docker 门禁，并提交可人工审查的 Pull Request（PR）。所有命令都从本仓库根目录执行，不依赖其他仓库的未跟踪文件。
+本页说明如何限定变更范围、运行 locked Rust 与 Docker 门禁，并让 Agent 管理可审查的 Pull Request（PR）生命周期。所有命令都从本仓库根目录执行，不依赖其他仓库的未跟踪文件。公开的 `main` 是开发主线，不表示 stable 发布状态。
 
 ## 从 Issue 建立变更范围
 
-每项工作应先关联一个 GitHub Issue，并把预期行为、非目标和验证证据写清楚。第一条命令列出 mtmpg 自有 Issue；第二条命令读取当前跨仓库任务的真实 Issue：
+每项工作应先关联一个 mtmpg GitHub Issue，并把目标、范围、非目标和验证证据写清楚。跨仓库 Issue 只作为产品总线，实际修改仓库必须有自己的跟踪 Issue：
 
 ```bash
 gh issue list --repo codeh007/mtmpg --state open
-gh issue view https://github.com/codeh007/gomtmui/issues/116 \
+gh issue view 1 --repo codeh007/mtmpg \
   --json number,title,body,url,comments
 ```
 
@@ -16,14 +16,16 @@ gh issue view https://github.com/codeh007/gomtmui/issues/116 \
 
 1. 阅读 Issue 正文与已有讨论。
 2. 阅读相关 OpenSpec proposal、design、spec 和 tasks。
-3. 从当前目标分支创建名称包含 Issue 编号的短期分支。
+3. 稳态开发从最新受保护 `main` 创建名称包含 Issue 编号的短期分支。
 4. 只提交该 Issue 与当前 OpenSpec task 所需的文件。
 
 不要把无关重构、依赖升级或发布规则混入同一变更。任务完成且全部仓库工作结束后，再在 Issue 中统一回填 commit、验证结果和已知限制。
 
+当前 `issue-116-extract-pggomtm` 是默认分支尚无完整基线时的一次性 bootstrap ref，不是长期开发分支。它通过追溯审计、cold build 与 whole-branch review 后将非 force fast-forward 到 `main`，且不会创建 tag、Release 或 `latest`。
+
 ## 准备 Pull Request
 
-PR 应让维护者能够从 clean checkout 复现结论：
+PR 应让 Agent、维护者和外部贡献者能够从 clean checkout 复现结论：
 
 - 关联 Issue 与对应 OpenSpec change，并说明本次完成的 task 范围。
 - 说明行为变化、原生应用程序二进制接口（ABI）影响、安全边界和回退方式。
@@ -32,6 +34,20 @@ PR 应让维护者能够从 clean checkout 复现结论：
 - 如果使用人工智能（AI）辅助，说明使用范围与人工核对内容。
 
 不要对维护者正在审查的共享分支执行 `force push`。需要修正时追加清晰 commit，或先与维护者确认历史整理方式。
+
+## 由 Agent 管理 PR 生命周期
+
+公开开发基线进入 `main` 并完成 OpenSpec 任务 7.10 后，Agent 负责普通 PR 的完整生命周期：
+
+1. 从已限定的 mtmpg Issue 创建短期分支和 PR。
+2. 保持 PR 范围与 Issue、OpenSpec task 和验证证据一致。
+3. 等待 required `Native CI`，读取失败日志并修复根因。
+4. 确认讨论已经解决，且没有未审查的高风险变化。
+5. 使用 squash auto-merge 合并，并让 GitHub 自动删除源分支。
+
+Ruleset 的 required approving review 数为 `0`，避免单贡献者仓库依赖不存在的第二账号。该设置不取消技术审查：pgrx、JOSE、Rust toolchain、PostgreSQL minor、官方 base/header、Actions source/pin、release workflow 或写权限变化必须在 Issue/PR 中记录上游 diff、风险与独立技术结论，缺少证据时 Agent 不得启用 auto-merge。
+
+Auto-merge 与 ruleset 当前尚未启用；任务 7.10 完成前不得用直接合并模拟稳态流程。公开 fork PR 只能使用 GitHub-hosted 临时 runner、read-only token 和无 secret 上下文，禁止 `pull_request_target` 与发布权限。
 
 ## 保持依赖锁定
 
@@ -82,26 +98,28 @@ done
 
 不要删除测试、弱化断言、关闭 warning 或降低检查配置来获得通过结果。
 
-## 取得远端Native CI证据
+## 取得远端 Native CI 证据
 
-根`Dockerfile`是官方C header、真实PostgreSQL runtime和最终制品隔离的唯一build graph；GitHub Actions是执行和证据权威。把单一范围commit非force push到批准功能分支后，等待`Native CI`：
+根 `Dockerfile` 是官方 C header、真实 PostgreSQL runtime 和最终制品隔离的唯一 build graph；GitHub Actions 是执行和证据权威。把单一范围 commit 非 force push到短期分支后，等待 `Native CI`：
 
 ```bash
+branch="$(git branch --show-current)"
 gh run list \
   --repo codeh007/mtmpg \
   --workflow native-ci.yml \
-  --branch issue-116-extract-pggomtm \
+  --branch "$branch" \
   --limit 5
-gh run watch <run-id> --repo codeh007/mtmpg --exit-status
-gh run view <run-id> --repo codeh007/mtmpg --log-failed
+run_id=1234567890123
+gh run watch "$run_id" --repo codeh007/mtmpg --exit-status
+gh run view "$run_id" --repo codeh007/mtmpg --log-failed
 ```
 
-常规run使用BuildKit/GitHub Actions cache且无发布权限；不得用本地tag、终端日志或反复`--no-cache`替代远端证据。确需定位Docker差异时，可按README构建本地diagnostic image，但不能据此勾选任务。
+常规 PR/`main` run 使用 BuildKit/GitHub Actions cache 且无发布权限；不得用本地 tag、终端日志或反复 `--no-cache` 替代远端证据。确需定位 Docker 差异时，可按 README 构建本地 diagnostic image，但不能据此勾选任务。
 
-Workflow尚未被默认分支识别时，首次run由功能分支push或PR事件bootstrap。后续可以复验已有run：
+Workflow 尚未被默认分支识别时，一次性 run 由批准的功能 ref push 启动。进入 `main` 后，普通 cached lane 只服务 PR/`main`；schedule/dispatch cold lane 与 trusted release lane 由后续 OpenSpec task 分别建立。
 
 ```bash
-gh run rerun <run-id> --repo codeh007/mtmpg
+gh run rerun 1234567890123 --repo codeh007/mtmpg
 ```
 
 ## 审查原生 ABI 与 PostgreSQL minor
@@ -124,6 +142,8 @@ gh run rerun <run-id> --repo codeh007/mtmpg
 - 不读取或修改生产配置，除非任务明确授权且操作范围经过审查。
 
 发现意外泄露时停止提交，先撤销或轮换凭据，再按[安全政策](SECURITY.md)私密报告。
+
+公开读取的 `mtmpg-postgres` package 不需要部署 credential。Package、Release、tag 与 attestation 写权限只能由受保护 `main` 上的 trusted job 申请；普通 PR、fork、Compose、manifest 和文档示例不得包含这些权限或 credential。
 
 ## 更新 OpenSpec 与提交
 
