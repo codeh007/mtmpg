@@ -48,6 +48,7 @@ Native CI按以下顺序生成candidate：
 6. Push后生成release manifest、SBOM、provenance、attestation和checksums。
 
 Candidate tag、source和OCI digest必须一一对应，已有tag不得覆盖。PR、fork、失败main和重复version不得写package或发布材料。
+Candidate prerelease编号只绑定首次workflow run ID；同一run重试不得产生第二个版本。若tag已经写入而后续证据失败，重试必须拒绝覆盖，并由新的main commit生成新candidate。
 
 ## Consumer验收
 
