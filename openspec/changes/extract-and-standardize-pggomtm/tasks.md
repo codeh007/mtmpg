@@ -65,7 +65,7 @@
 - [x] 7.5 匿名拉取versioned image，复验source/version label、module/registry digest、Release assets和attestation，证明Actions artifact不是长期消费权威
 - [x] 7.6 在新命名prerelease完整可读后精确退役`mtmpg-postgres`旧阶段性package versions与孤立attestation referrer，保留Git、Actions run和Issue历史
 - [x] 7.7 更新README、release/compatibility与维护文档，只描述PR/main CI、SemVer tag release、`ghcr.io/codeh007/mtmpg`和标准供应链材料，并完成聚焦检查与严格OpenSpec校验
-- [ ] 7.8 完成7.7后在mtmpg #1与gomtmui #116/#117回填阶段性结果，记录prerelease、source、OCI digest、Actions run、Release/attestation和未完成stable事项
+- [x] 7.8 完成7.7后在mtmpg #1与gomtmui #116/#117回填阶段性结果，记录prerelease、source、OCI digest、Actions run、Release/attestation和未完成stable事项
 
 ## 8. 独立Stable发布与收尾
 
