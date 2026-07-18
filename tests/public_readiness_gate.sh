@@ -144,6 +144,45 @@ if grep --quiet --fixed-strings "${INLINE_TOKEN}" \
   fail "scanner output disclosed the inline-allow sentinel"
 fi
 
+readonly APPROVED_DIGEST_ROOT="${TEMP_ROOT}/approved-public-digest"
+initialize_repository "${APPROVED_DIGEST_ROOT}"
+install -d "${APPROVED_DIGEST_ROOT}/scripts"
+printf '%s\n' \
+  'readonly OAUTH_HEADER_SHA256="be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bcf"' \
+  >"${APPROVED_DIGEST_ROOT}/scripts/native-test"
+git -C "${APPROVED_DIGEST_ROOT}" add scripts/native-test
+git -C "${APPROVED_DIGEST_ROOT}" commit --quiet --message "test: add public header digest"
+"${GATE}" scan-source "${APPROVED_DIGEST_ROOT}" \
+  >"${TEMP_ROOT}/approved-public-digest.out"
+
+readonly WRONG_DIGEST_PATH_ROOT="${TEMP_ROOT}/wrong-public-digest-path"
+initialize_repository "${WRONG_DIGEST_PATH_ROOT}"
+install -d "${WRONG_DIGEST_PATH_ROOT}/scripts/native-test-copy"
+printf '%s\n' \
+  'readonly OAUTH_HEADER_SHA256="be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bcf"' \
+  >"${WRONG_DIGEST_PATH_ROOT}/scripts/native-test-copy/config"
+git -C "${WRONG_DIGEST_PATH_ROOT}" add scripts/native-test-copy/config
+git -C "${WRONG_DIGEST_PATH_ROOT}" commit --quiet --message "test: move public header digest"
+if "${GATE}" scan-source "${WRONG_DIGEST_PATH_ROOT}" \
+  >"${TEMP_ROOT}/wrong-public-digest-path.out" 2>&1; then
+  fail "public digest allowlist accepted the wrong path"
+fi
+assert_redacted "${TEMP_ROOT}/wrong-public-digest-path.out"
+
+readonly WRONG_DIGEST_VALUE_ROOT="${TEMP_ROOT}/wrong-public-digest-value"
+initialize_repository "${WRONG_DIGEST_VALUE_ROOT}"
+install -d "${WRONG_DIGEST_VALUE_ROOT}/scripts"
+printf '%s\n' \
+  'readonly OAUTH_HEADER_SHA256="be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bca"' \
+  >"${WRONG_DIGEST_VALUE_ROOT}/scripts/native-test"
+git -C "${WRONG_DIGEST_VALUE_ROOT}" add scripts/native-test
+git -C "${WRONG_DIGEST_VALUE_ROOT}" commit --quiet --message "test: change public header digest"
+if "${GATE}" scan-source "${WRONG_DIGEST_VALUE_ROOT}" \
+  >"${TEMP_ROOT}/wrong-public-digest-value.out" 2>&1; then
+  fail "public digest allowlist accepted a different value"
+fi
+assert_redacted "${TEMP_ROOT}/wrong-public-digest-value.out"
+
 readonly CLEAN_SOURCE_ROOT="${TEMP_ROOT}/clean-source"
 initialize_repository "${CLEAN_SOURCE_ROOT}"
 "${GATE}" scan-source "${CLEAN_SOURCE_ROOT}" >"${TEMP_ROOT}/clean-source.out"
