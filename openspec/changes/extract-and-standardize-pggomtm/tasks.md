@@ -55,7 +55,7 @@
 - [x] 7.3 实现默认redact的追溯式public-readiness门禁，覆盖全部refs/history、tracked/uncommitted文件、Docker context、workflow源码/log、Actions artifact/cache、GitHub Issue/PR和candidate image；合成fixture只允许精确路径/模式/理由分类
 - [x] 7.4 增加动态链接、ELF export、arch/libc、module位置、官方entrypoint、image filesystem与build-manifest门禁，证明candidate/stable image只增加正式`.so`、MIT license和不含自身OCI digest的公开build metadata
 - [x] 7.5 同步README、SECURITY、CONTRIBUTING、MAINTAINERS、AGENTS、GitHub治理与release文档到public、development-main、Agent auto-merge和公开GHCR语义；在mtmpg创建后续release跟踪Issue并反向链接gomtmui #116/#117
-- [ ] 7.6 在当前公开远端执行完整追溯扫描；真实secret命中时先吊销或轮换并经批准处置history/remote，只有重扫通过后才继续，且不得通过重新设为private或删除日志冒充处置
+- [x] 7.6 在当前公开远端执行完整追溯扫描；真实secret命中时先吊销或轮换并经批准处置history/remote，只有重扫通过后才继续，且不得通过重新设为private或删除日志冒充处置
 - [ ] 7.7 删除全部无法逐项证明安全的公开前GitHub Actions/BuildKit cache，从clean checkout对最终remote HEAD运行一次无secret、无缓存bootstrap cold build，记录source、run、image和脱敏finding摘要
 - [ ] 7.8 对最终remote HEAD完成whole-branch review、source identity、dependency/license、public-readiness、cold与artifact矩阵复核，并运行`git diff --check`和`openspec validate extract-and-standardize-pggomtm --strict`
 - [ ] 7.9 按Issue #116授权把已审查功能分支以非force fast-forward原样推进到`origin/main`，确认默认分支识别README/LICENSE/SECURITY/Cargo/workflow后删除功能分支，并证明没有创建tag、Release、package version alias或`latest`
