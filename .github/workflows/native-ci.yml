@@ -243,7 +243,7 @@ jobs:
             }' >candidate-metadata.json
 
       - name: Upload verified candidate materials
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mtmpg-candidate-${{ github.sha }}-${{ github.run_attempt }}
           path: |
