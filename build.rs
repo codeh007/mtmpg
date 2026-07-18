@@ -73,7 +73,11 @@ fn required_path(name: &str) -> BuildResult<PathBuf> {
 
 fn required_file(path: &Path) -> BuildResult<PathBuf> {
     if !path.is_file() {
-        return Err(format!("required PostgreSQL header is unavailable: {}", path.display()).into());
+        return Err(format!(
+            "required PostgreSQL header is unavailable: {}",
+            path.display()
+        )
+        .into());
     }
     Ok(path.to_path_buf())
 }

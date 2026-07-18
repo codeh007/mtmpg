@@ -249,9 +249,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        MAX_PUBLIC_JWKS_BYTES, MAX_VALIDATOR_CONFIG_BYTES, PUBLIC_JWKS_PATH,
-        RuntimeConfigError, VALIDATOR_CONFIG_PATH, ValidatorSnapshot,
-        load_validator_snapshot_from_paths,
+        MAX_PUBLIC_JWKS_BYTES, MAX_VALIDATOR_CONFIG_BYTES, PUBLIC_JWKS_PATH, RuntimeConfigError,
+        VALIDATOR_CONFIG_PATH, ValidatorSnapshot, load_validator_snapshot_from_paths,
     };
     use crate::database_auth::{
         AuthMethod, DatabaseProfile, DatabaseTokenClaims, JwtValidationError,
@@ -516,10 +515,7 @@ mod tests {
         })
     }
 
-    fn assert_fixture_error(
-        expected: RuntimeConfigError,
-        setup: impl FnOnce(&Fixture),
-    ) {
+    fn assert_fixture_error(expected: RuntimeConfigError, setup: impl FnOnce(&Fixture)) {
         let fixture = Fixture::new();
         setup(&fixture);
         assert_load_error(&fixture, expected);
