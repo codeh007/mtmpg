@@ -303,6 +303,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
+      - name: Resolve current ORAS client
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull ghcr.io/oras-project/oras:latest >/dev/null
+          oras_image="$(docker image inspect \
+            --format '{{ index .RepoDigests 0 }}' \
+            ghcr.io/oras-project/oras:latest)"
+          [[ "$oras_image" =~ ^ghcr\.io/oras-project/oras@sha256:[0-9a-f]{64}$ ]]
+          oras_version="$(docker run --rm "$oras_image" version | awk '/^Version:/ {print $2}')"
+          test -n "$oras_version"
+          {
+            echo "ORAS_IMAGE=$oras_image"
+            echo "ORAS_VERSION=$oras_version"
+          } >>"$GITHUB_ENV"
+
       - name: Verify and publish the immutable candidate
         shell: bash
         env:
@@ -340,8 +356,13 @@ jobs:
           archive_manifest_digest="$(skopeo inspect --format '{{.Digest}}' "oci-archive:$oci_archive")"
           test "$archive_manifest_digest" = "$(jq --raw-output '.oci_manifest_digest' "$material_root/candidate-metadata.json")"
           target_reference="$IMAGE_REPOSITORY:$candidate_version"
+          evidence_reference="$IMAGE_REPOSITORY:$candidate_version.evidence"
           if skopeo inspect --authfile "$auth_file" "docker://$target_reference" >/dev/null 2>&1; then
             echo "candidate version already exists: $candidate_version" >&2
+            exit 1
+          fi
+          if skopeo inspect --raw --authfile "$auth_file" "docker://$evidence_reference" >/dev/null 2>&1; then
+            echo "candidate evidence already exists: $candidate_version" >&2
             exit 1
           fi
 
@@ -359,6 +380,7 @@ jobs:
 
           {
             echo "CANDIDATE_VERSION=$candidate_version"
+            echo "EVIDENCE_REFERENCE=$evidence_reference"
             echo "EVIDENCE_ROOT=$RUNNER_TEMP/candidate-evidence"
             echo "IMAGE_REPOSITORY=$IMAGE_REPOSITORY"
             echo "MATERIAL_ROOT=$material_root"
@@ -398,6 +420,8 @@ jobs:
             --arg image_repository "$IMAGE_REPOSITORY" \
             --arg registry_digest "$REGISTRY_DIGEST" \
             --arg sbom_sha256 "$sbom_sha256" \
+            --arg oras "$ORAS_VERSION" \
+            --arg oras_image "$ORAS_IMAGE" \
             --arg skopeo "$skopeo_version" \
             --arg syft "$syft_version" \
             '{
@@ -422,7 +446,12 @@ jobs:
                 registry_digest: $registry_digest
               },
               sbom: {format: "spdx-json", sha256: $sbom_sha256},
-              tooling: {skopeo: $skopeo, syft: $syft}
+              tooling: {
+                oras: $oras,
+                oras_image: $oras_image,
+                skopeo: $skopeo,
+                syft: $syft
+              }
             }' >"$EVIDENCE_ROOT/release-manifest.json"
 
       - name: Attest candidate provenance
@@ -548,6 +577,93 @@ jobs:
               >checksums.txt
             sha256sum --check checksums.txt
           )
+
+      - name: Publish and anonymously verify immutable OCI evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth_file="$HOME/.docker/config.json"
+          test -f "$auth_file"
+          test -f "$EVIDENCE_ROOT/checksums.txt"
+          push_result="$(docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --workdir /evidence \
+            --mount "type=bind,src=$EVIDENCE_ROOT,dst=/evidence,readonly" \
+            --mount "type=bind,src=$auth_file,dst=/auth/config.json,readonly" \
+            "$ORAS_IMAGE" \
+            push \
+            --registry-config /auth/config.json \
+            --artifact-type application/vnd.codeh007.mtmpg.release-evidence.v1 \
+            --subject "$IMAGE_REPOSITORY@$REGISTRY_DIGEST" \
+            --annotation "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --annotation "org.opencontainers.image.version=$CANDIDATE_VERSION" \
+            --format json \
+            "$EVIDENCE_REFERENCE" \
+            Cargo.lock:application/vnd.codeh007.mtmpg.cargo-lock \
+            resolved-inputs.json:application/json \
+            candidate-metadata.json:application/json \
+            release-manifest.json:application/json \
+            sbom.spdx.json:application/spdx+json \
+            provenance.intoto.jsonl:application/vnd.in-toto+json \
+            sbom-attestation.intoto.jsonl:application/vnd.in-toto+json \
+            attestation.json:application/json \
+            checksums.txt:text/plain)"
+          evidence_digest="$(jq --raw-output '.digest' <<<"$push_result")"
+          [[ "$evidence_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+          anonymous_config="$RUNNER_TEMP/anonymous-docker"
+          verify_root="$RUNNER_TEMP/evidence-verify"
+          install -d -m 0700 "$anonymous_config" "$verify_root"
+          printf '{"auths":{}}\n' >"$anonymous_config/config.json"
+          anonymous_ready=0
+          for _ in $(seq 1 10); do
+            rm -f -- "$verify_root"/*
+            if docker run --rm \
+              --user "$(id -u):$(id -g)" \
+              --mount "type=bind,src=$anonymous_config/config.json,dst=/auth/config.json,readonly" \
+              --mount "type=bind,src=$verify_root,dst=/verify" \
+              "$ORAS_IMAGE" \
+              pull \
+              --registry-config /auth/config.json \
+              --output /verify \
+              "$EVIDENCE_REFERENCE" >/dev/null 2>&1; then
+              anonymous_ready=1
+              break
+            fi
+            sleep 3
+          done
+          test "$anonymous_ready" -eq 1
+          test "$(docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --mount "type=bind,src=$anonymous_config/config.json,dst=/auth/config.json,readonly" \
+            "$ORAS_IMAGE" \
+            resolve \
+            --registry-config /auth/config.json \
+            "$EVIDENCE_REFERENCE")" = "$evidence_digest"
+          evidence_manifest="$(docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --mount "type=bind,src=$anonymous_config/config.json,dst=/auth/config.json,readonly" \
+            "$ORAS_IMAGE" \
+            manifest fetch \
+            --registry-config /auth/config.json \
+            "$EVIDENCE_REFERENCE")"
+          jq --exit-status \
+            --arg artifact_type "application/vnd.codeh007.mtmpg.release-evidence.v1" \
+            --arg image_digest "$REGISTRY_DIGEST" \
+            '.artifactType == $artifact_type and .subject.digest == $image_digest' \
+            <<<"$evidence_manifest" >/dev/null
+          (
+            cd "$verify_root"
+            sha256sum --check checksums.txt
+          )
+          jq --exit-status \
+            --arg source "$GITHUB_SHA" \
+            --arg version "$CANDIDATE_VERSION" \
+            --arg digest "$REGISTRY_DIGEST" \
+            '.source == $source and .version == $version and
+             .oci.registry_digest == $digest' \
+            "$verify_root/release-manifest.json" >/dev/null
+          echo "EVIDENCE_DIGEST=$evidence_digest" >>"$GITHUB_ENV"
 
       - name: Upload candidate release evidence
         uses: actions/upload-artifact@v7

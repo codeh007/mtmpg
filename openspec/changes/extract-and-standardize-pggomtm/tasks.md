@@ -49,12 +49,12 @@
 
 ## 6. SemVer Candidate与供应链证据
 
-- [ ] 6.1 从Cargo package/release输入生成不可覆盖的mtmpg SemVer prerelease candidate，并验证版本、source和workflow run唯一
-- [ ] 6.2 增加仅对仓库自身成功`main` push生效的最小写权限publish job，下载并推送已验证OCI archive且不运行Cargo或Docker build
-- [ ] 6.3 推送公开`ghcr.io/codeh007/mtmpg-postgres:<semver-prerelease>`，记录registry返回的完整OCI digest并拒绝覆盖既有version
-- [ ] 6.4 生成release manifest，绑定mtmpg version、source、Cargo.lock、resolved inputs、PG18、module、OCI archive和registry digest
-- [ ] 6.5 为同一candidate生成并验证SBOM、provenance、attestation和checksums，确认全部材料描述实际解析结果而非下一次构建的预批准输入
-- [ ] 6.6 验证GHCR匿名公开读取，并证明失败main、PR、fork和重复version无法取得package、Release或attestation写入结果
+- [x] 6.1 从Cargo package/release输入生成不可覆盖的mtmpg SemVer prerelease candidate，并验证版本、source和workflow run唯一
+- [x] 6.2 增加仅对仓库自身成功`main` push生效的最小写权限publish job，下载并推送已验证OCI archive且不运行Cargo或Docker build
+- [x] 6.3 推送公开`ghcr.io/codeh007/mtmpg-postgres:<semver-prerelease>`，记录registry返回的完整OCI digest并拒绝覆盖既有version
+- [ ] 6.4 生成release manifest，绑定mtmpg version、source、Cargo.lock、resolved inputs、PG18、module、OCI archive和registry digest，并发布不可覆盖OCI evidence引用
+- [ ] 6.5 为同一candidate生成并验证SBOM、provenance、attestation和checksums，匿名拉回OCI evidence复验，确认材料不依赖会被run重试删除的Actions artifact
+- [x] 6.6 验证GHCR匿名公开读取，并证明失败main、PR、fork和重复version无法取得package、Release或attestation写入结果
 
 ## 7. Gomtmui远端消费验收
 

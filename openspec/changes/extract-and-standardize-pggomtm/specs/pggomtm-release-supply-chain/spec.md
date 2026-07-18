@@ -117,22 +117,24 @@ Actions SHALL对本次构建的最终image验证实际PostgreSQL属于PG18、官
 
 Candidate SHALL使用不可覆盖的mtmpg SemVer prerelease tag。完整OCI digest SHALL在push后记录为证据身份；candidate阶段 MUST NOT创建稳定SemVer、`latest`或stable GitHub Release。
 
+Candidate的Cargo.lock、resolved inputs、manifest、SBOM、provenance、attestation和checksums SHALL同时发布为同一公开GHCR repository内按candidate SemVer派生的不可覆盖OCI evidence artifact。Actions artifact MAY用于job传递和短期诊断，但consumer与promotion MUST NOT依赖会在同run重试时被删除的Actions artifact。
+
 #### Scenario: Main全部门禁成功
 - **WHEN** 精确main commit的resolve、领域、ABI、PG18和final-image验证全部通过
 - **THEN** publish job SHALL推送已验证OCI archive一次，输出SemVer candidate和完整OCI digest
 
 #### Scenario: 发布条件不满足
 - **WHEN** event不是仓库自身`main` push、任一前置job失败或candidate version已经存在
-- **THEN** workflow SHALL不写入GHCR、tag、Release或attestation
+- **THEN** workflow SHALL不写入GHCR image/evidence、tag、Release或attestation
 
 ### Requirement: Release材料必须记录实际制品与输入
-Candidate evidence SHALL包含本次Cargo.lock、`resolved-inputs.json`、release manifest、SBOM、provenance、attestation和checksums，并 SHALL绑定mtmpg SemVer、source SHA、module digest、OCI digest及实际解析的toolchain/dependency/PostgreSQL/base身份。
+Candidate evidence SHALL包含本次Cargo.lock、`resolved-inputs.json`、release manifest、SBOM、provenance、attestation和checksums，并 SHALL绑定mtmpg SemVer、source SHA、module digest、image OCI digest、evidence OCI digest及实际解析的toolchain/dependency/PostgreSQL/base身份。
 
 Evidence MUST描述实际结果，不得把某个上游patch或digest作为下一次构建的预批准输入。Workflow MUST NOT重建image来补写metadata；所有材料 MUST从同一已验证OCI archive生成且不含credential。
 
 #### Scenario: 生成candidate evidence
 - **WHEN** candidate OCI digest已经产生
-- **THEN** workflow SHALL发布完整实际输入和制品关系，使SemVer能够无歧义解析到source、lockfile、module与OCI digest
+- **THEN** workflow SHALL发布并匿名复验不可覆盖OCI evidence，使SemVer能够无歧义解析到source、lockfile、module、image digest与evidence digest，且后续run重试不能删除该发布证据
 
 #### Scenario: 供应链身份不一致
 - **WHEN** source、lockfile、module、OCI archive、registry digest、SBOM或attestation任一不匹配

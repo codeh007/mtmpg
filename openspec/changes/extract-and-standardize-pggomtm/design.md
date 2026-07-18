@@ -93,9 +93,16 @@ build production image once -> verify that image -> OCI archive
                           v                                     v
                   publish candidate                    release evidence
                   without rebuild                     lock/SBOM/provenance
+                          |                                     |
+                          +------------------+------------------+
+                                             |
+                                             v
+                              immutable public OCI evidence
 ```
 
 只读验证 job 生成并验证 production OCI archive，再把 archive 和 evidence 作为 workflow artifact 交给最小写权限 publish job。Publish job只推送已验证 archive，不运行 Cargo 或 Docker build。这样即使源码允许浮动依赖，测试对象和发布对象仍是同一 bytes。
+
+Workflow artifact只用于本次run内的传递和短期诊断，不是发布权威。GitHub重跑同一run会删除前一attempt的artifact，因此publish job必须把Cargo.lock、resolved inputs、release manifest、SBOM、provenance、attestation和checksums作为同仓库、按candidate SemVer命名且不可覆盖的公开OCI evidence artifact发布。Consumer与stable promotion从该OCI引用取证；重复run在任何写入前同时拒绝既有image tag和evidence tag。
 
 Dockerfile 可以为 builder/runtime `ARG` 提供浮动稳定 tag 默认值；Actions 必须传入 resolve step 得到的临时完整 digest。源码因此不锁 digest，而单次 run 仍避免 build/test 间的上游漂移。
 
@@ -133,7 +140,7 @@ Dockerfile 可以为 builder/runtime `ARG` 提供浮动稳定 tag 默认值；Ac
 
 ### 6. SemVer是产品身份，digest是证据身份
 
-Candidate 使用 mtmpg SemVer prerelease，例如 `0.1.0-rc.<run>`；gomtmui Compose 和用户文档引用该版本化 tag。Consumer workflow在拉取时解析完整 OCI digest，并把 `mtmpg version -> source -> OCI digest -> module digest -> gomtmui source` 写入验收证据。
+Candidate 使用 mtmpg SemVer prerelease，例如 `0.1.0-rc.<run>`；gomtmui Compose 和用户文档引用该版本化 tag。对应供应链材料使用同版本派生的不可覆盖OCI evidence引用。Consumer workflow在拉取时解析image与evidence完整 OCI digest，并把 `mtmpg version -> source -> image digest -> evidence digest -> module digest -> gomtmui source` 写入验收证据。
 
 Stable promotion只为同一已验收 digest增加稳定 SemVer和`latest`tag并创建 immutable GitHub Release，不重建 image。Workflow必须拒绝覆盖既有 SemVer tag或Release。用户以 mtmpg version交流和升级；digest用于机器校验、attestation和证明 promotion 没有换包。
 
@@ -153,7 +160,7 @@ consumer失败 -> 不promotion -> 发布新candidate重新验收
 - **最新上游版本引入不兼容** -> `main` CI fail closed，上一 release 保持可用；通过后续源码修复适配，不回退到永久 pin。
 - **自动跨 PostgreSQL major 会破坏 ABI** -> 浮动范围限定 PG18；PG19 需要显式 feature、路径、ABI 和真实运行变更。
 - **删减测试可能遗漏真实回归** -> 以领域风险和真实系统边界决定保留项，并在删除前把每个测试映射到仍存在的 requirement；不以行数作为唯一标准。
-- **SemVer tag可能被覆盖** -> publish/promotion workflow在写入前验证 tag、package和Release不存在，并用记录的 OCI digest审计不可变性。
+- **SemVer tag或evidence可能被覆盖** -> publish/promotion workflow在写入前验证image tag、evidence tag、package和Release不存在，并用记录的 OCI digest审计不可变性；不依赖rerun会删除的Actions artifact。
 - **删除自定义扫描器降低历史覆盖** -> 标准 secret scanning只保护当前source和提交历史；历史调查按需使用外部工具，不继续维护在产品仓库中。
 
 ## Migration Plan
@@ -162,7 +169,7 @@ consumer失败 -> 不promotion -> 发布新candidate重新验收
 2. 删除明确废弃的文档、历史证据和失效引用，迁移最小 test fixture，压缩 runtime config和领域测试。
 3. 删除精确版本/hash断言和自定义策略脚本，简化 `build.rs`、Cargo/toolchain、Dockerfile 与 Native CI resolve/test/build流程。
 4. 在 `main` 通过远端 Actions取得 latest-compatible domain、ABI、真实 PG18 和最终 image成功结果；不使用本地重计算替代。
-5. 从已验证 OCI archive发布首个 SemVer candidate及其 lockfile、resolved inputs、SBOM、provenance和attestation。
+5. 从已验证 OCI archive发布首个 SemVer candidate，并把lockfile、resolved inputs、SBOM、provenance和attestation发布为不可覆盖OCI evidence。
 6. Gomtmui按 candidate version远端验收并记录实际 digest，完成真实 OAuth、ACL/RLS和rollback。
 7. 将同一 digest晋级稳定SemVer，创建immutable Release并回填mtmpg #1、gomtmui #116/#117。
 

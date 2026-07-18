@@ -46,13 +46,16 @@ Native CI按以下顺序生成candidate：
 4. 只读job验证archive并上传Cargo.lock、`resolved-inputs.json`和测试结果。
 5. 最小写权限publish job推送同一archive，不运行Cargo或Docker build。
 6. Push后生成release manifest、SBOM、provenance、attestation和checksums。
+7. 把上述材料发布为同仓库`<candidate-version>.evidence`不可覆盖OCI artifact，并完成匿名拉取复验。
 
 Candidate tag、source和OCI digest必须一一对应，已有tag不得覆盖。PR、fork、失败main和重复version不得写package或发布材料。
 Candidate prerelease编号只绑定首次workflow run ID；同一run重试不得产生第二个版本。若tag已经写入而后续证据失败，重试必须拒绝覆盖，并由新的main commit生成新candidate。
 
+Actions artifact只负责同一次run内的job传递和短期诊断。GitHub重跑同一run会删除前一attempt的artifact，因此consumer与stable promotion必须从公开GHCR的不可变OCI evidence引用取得Cargo.lock、resolved inputs、manifest、SBOM、attestation和checksums，不得把Actions artifact当作长期发布权威。
+
 ## Consumer验收
 
-Gomtmui按candidate SemVer配置PostgreSQL image，并在远端解析实际OCI digest。Consumer evidence必须绑定mtmpg version/source/manifest/module/OCI digest与gomtmui source，并覆盖：
+Gomtmui按candidate SemVer配置PostgreSQL image，从对应不可变OCI evidence引用取得发布材料，并在远端解析两者的实际OCI digest。Consumer evidence必须绑定mtmpg version/source/manifest/module/image digest/evidence digest与gomtmui source，并覆盖：
 
 - 官方initdb、volume、healthcheck与PG18启动
 - TLS、sub2api与pgAdmin连接
