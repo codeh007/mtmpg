@@ -23,8 +23,9 @@ ARTIFACT_ROOT="$(realpath -- "$4")" || fail "artifact directory cannot be resolv
 readonly ARTIFACT_ROOT
 
 [[ "${SOURCE_REVISION}" =~ ^[0-9a-f]{40}$ ]] || fail "source must be a full Git commit"
-[[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+(\.[0-9]+)*)?$ ]] || \
-  fail "version is not an mtmpg SemVer candidate"
+readonly SEMVER_IDENTIFIER='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+readonly SEMVER_PATTERN="^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(-${SEMVER_IDENTIFIER}([.]${SEMVER_IDENTIFIER})*)?$"
+[[ "${VERSION}" =~ ${SEMVER_PATTERN} ]] || fail "version is not an mtmpg SemVer"
 test -x "${ARTIFACT_ROOT}/pggomtm_oauth_smoke_client" || fail "OAuth client is unavailable"
 test -x "${ARTIFACT_ROOT}/pggomtm_oauth_smoke_fixture" || fail "OAuth fixture is unavailable"
 command -v "${DOCKER_BIN}" >/dev/null || fail "Docker is unavailable"
