@@ -599,7 +599,6 @@ jobs:
             push \
             --registry-config /auth/config.json \
             --artifact-type application/vnd.codeh007.mtmpg.release-evidence.v1 \
-            --subject "$IMAGE_REPOSITORY@$REGISTRY_DIGEST" \
             --annotation "org.opencontainers.image.revision=$GITHUB_SHA" \
             --annotation "org.opencontainers.image.version=$CANDIDATE_VERSION" \
             --format json \
@@ -654,8 +653,11 @@ jobs:
             "$EVIDENCE_REFERENCE")"
           jq --exit-status \
             --arg artifact_type "application/vnd.codeh007.mtmpg.release-evidence.v1" \
-            --arg image_digest "$REGISTRY_DIGEST" \
-            '.artifactType == $artifact_type and .subject.digest == $image_digest' \
+            --arg source "$GITHUB_SHA" \
+            --arg version "$CANDIDATE_VERSION" \
+            '.artifactType == $artifact_type and
+             .annotations["org.opencontainers.image.revision"] == $source and
+             .annotations["org.opencontainers.image.version"] == $version' \
             <<<"$evidence_manifest" >/dev/null
           (
             cd "$verify_root"
