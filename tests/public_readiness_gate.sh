@@ -256,6 +256,29 @@ for native_command in \
   assert_contains "${NATIVE_WORKFLOW}" \
     "scripts/native-container exec ${native_command}"
 done
+abi_step_line="$(
+  grep --line-number --fixed-strings \
+    'run: scripts/native-container exec abi' \
+    "${NATIVE_WORKFLOW}" \
+    | cut -d: -f1
+)"
+quality_step_line="$(
+  grep --line-number --fixed-strings \
+    'run: scripts/native-container exec quality' \
+    "${NATIVE_WORKFLOW}" \
+    | cut -d: -f1
+)"
+cargo_step_line="$(
+  grep --line-number --fixed-strings \
+    'run: scripts/native-container exec cargo-tests' \
+    "${NATIVE_WORKFLOW}" \
+    | cut -d: -f1
+)"
+readonly abi_step_line quality_step_line cargo_step_line
+if ! test "${abi_step_line}" -lt "${quality_step_line}" || \
+  ! test "${abi_step_line}" -lt "${cargo_step_line}"; then
+  fail "ABI provenance must run against a clean Cargo target"
+fi
 assert_contains "${NATIVE_WORKFLOW}" \
   "tests/postgres_integration.sh run target/native-integration"
 assert_contains "${NATIVE_WORKFLOW}" \

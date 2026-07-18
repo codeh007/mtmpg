@@ -84,6 +84,10 @@ jobs:
         shell: bash
         run: scripts/native-container exec dependencies
 
+      - name: Verify official OAuth ABI provenance
+        shell: bash
+        run: scripts/native-container exec abi
+
       - name: Run Rustfmt and Clippy
         shell: bash
         run: scripts/native-container exec quality
@@ -91,10 +95,6 @@ jobs:
       - name: Run Cargo test matrices
         shell: bash
         run: scripts/native-container exec cargo-tests
-
-      - name: Verify official OAuth ABI provenance
-        shell: bash
-        run: scripts/native-container exec abi
 
       - name: Verify production module
         shell: bash
