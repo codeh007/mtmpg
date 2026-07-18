@@ -97,7 +97,7 @@ install -d -m 0700 "${SESSION_ROOT}/fixtures"
 cat >"${SESSION_ROOT}/init.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-psql --host=/tmp --set ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'SQL'
+psql --host="$PGHOST" --set ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'SQL'
 CREATE ROLE gomtm_candidate_ordinary LOGIN;
 SQL
 cat >"$PGDATA/pg_hba.conf" <<'HBA'
@@ -113,6 +113,7 @@ RUNTIME_CONTAINER="pggomtm-image-${GITHUB_RUN_ID:-ci}-$$"
   --detach \
   --name "${RUNTIME_CONTAINER}" \
   --platform linux/amd64 \
+  --env PGHOST=/var/run/postgresql \
   --env POSTGRES_HOST_AUTH_METHOD=trust \
   --mount "type=bind,src=${SESSION_ROOT}/init.sh,dst=/docker-entrypoint-initdb.d/10-pggomtm.sh,readonly" \
   --mount "type=bind,src=${SESSION_ROOT}/config,dst=/etc/pggomtm,readonly" \
@@ -121,13 +122,12 @@ RUNTIME_CONTAINER="pggomtm-image-${GITHUB_RUN_ID:-ci}-$$"
   --tmpfs /var/lib/postgresql:rw,nosuid,nodev,size=512m \
   "${IMAGE}" \
   -c oauth_validator_libraries=pggomtm \
-  -c unix_socket_directories=/tmp \
   -c log_min_messages=log >/dev/null
 
 ready=0
 for _ in $(seq 1 60); do
   if "${DOCKER_BIN}" exec "${RUNTIME_CONTAINER}" \
-    pg_isready --host=/tmp --username=postgres --dbname=postgres >/dev/null 2>&1; then
+    pg_isready --host=/var/run/postgresql --username=postgres --dbname=postgres >/dev/null 2>&1; then
     ready=1
     break
   fi
@@ -140,7 +140,7 @@ fi
 
 test "$(
   "${DOCKER_BIN}" exec "${RUNTIME_CONTAINER}" \
-    psql --host=/tmp --username=postgres --dbname=postgres --tuples-only --no-align \
+    psql --host=/var/run/postgresql --username=postgres --dbname=postgres --tuples-only --no-align \
       --command='SHOW oauth_validator_libraries'
 )" = "pggomtm" || fail "production module was not loaded"
 

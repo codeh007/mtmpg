@@ -31,18 +31,20 @@ main(int argc, char **argv)
 	bool expect_startup_reason;
 	const char *expected_role;
 	const char *system_user_path = NULL;
+	const char *host = getenv("PGHOST");
 	const char *const keywords[] = {
 		"host", "port", "dbname", "user", "oauth_issuer",
 		"oauth_client_id", "require_auth", "connect_timeout", NULL
 	};
 	const char *values[] = {
-		"/tmp", "5432", "postgres", NULL,
+		NULL, "5432", "postgres", NULL,
 		"https://candidate.example.test/oauth/database",
 		"pggomtm-smoke", "oauth", "5", NULL
 	};
 	PGconn *conn = NULL;
 	int status = EXIT_FAILURE;
 
+	values[0] = host == NULL || host[0] == '\0' ? "/tmp" : host;
 	if (argc < 4 ||
 		(strcmp(argv[1], "--expect-allowed") != 0 &&
 		 strcmp(argv[1], "--expect-rejected") != 0 &&
