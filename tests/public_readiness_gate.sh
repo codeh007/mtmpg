@@ -199,7 +199,7 @@ assert_contains "${NATIVE_WORKFLOW}" \
 assert_contains "${NATIVE_WORKFLOW}" \
   "scripts/public-readiness scan-source \"\$GITHUB_WORKSPACE\""
 assert_contains "${NATIVE_WORKFLOW}" \
-  'no-cache: ${{ github.event_name == '\''push'\'' && github.ref == '\''refs/heads/issue-116-extract-pggomtm'\'' }}'
+  "no-cache: \${{ github.event_name == 'push' && github.ref == 'refs/heads/issue-116-extract-pggomtm' }}"
 
 readonly CLEAN_BUNDLE_ROOT="${TEMP_ROOT}/clean-bundle"
 initialize_surface_bundle "${CLEAN_BUNDLE_ROOT}" "absent" 0
