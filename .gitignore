@@ -1,4 +1,5 @@
 # Cargo 与本地编译输出
+/Cargo.lock
 target/
 **/*.rs.bk
 **/mutants.out*/

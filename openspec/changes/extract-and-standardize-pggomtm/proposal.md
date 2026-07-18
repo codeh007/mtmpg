@@ -1,25 +1,23 @@
 ## Why
 
-`pggomtm` 已经具备 PostgreSQL 18.4 OAuth validator 的核心实现，但开发与发布流程仍围绕临时功能分支、本地 Docker 构建、Dockerfile 内嵌测试以及过度的 PR/branch-protection 仪式展开。这些流程消耗本地计算资源，也没有把维护者真正关心的边界表达清楚：`main` 可以作为持续演进的源码集成线，只有通过远端验证的不可变构建物才能交付给用户。
+`pggomtm` 的生产源码规模有限，但仓库已经累积了大量历史证据、流程脚本、策略自测和精确版本断言，维护成本反而超过业务实现。项目需要回到以最新兼容稳定技术栈、真实 PostgreSQL/OAuth 行为和可发布 mtmpg 版本为中心的最小开发与发布模型。
 
 ## What Changes
 
-- **BREAKING**：`main` 改为唯一持续集成与交付来源，允许维护者和 Agent 直接非 force 推送；不再要求 required PR、branch protection、squash-only、approving review 或 auto-merge 才能推进源码。
-- 将 `issue-116-extract-pggomtm` 非 force fast-forward 到 `main`，删除 workflow 中的临时分支 trigger，并在迁移完成后删除该临时分支。
-- 开发、测试和制品检查不再在共享本地工作区执行 `docker build`、`docker run` 或等价重计算；固定工具链、Rust/ABI/PostgreSQL 18.4 测试和 image 检查全部由 GitHub Actions 执行。
-- `main` 的暂时失败不会回退或改写源码，但失败的 commit 不得发布 candidate、更新 stable alias 或覆盖既有制品。
-- 根 `Dockerfile` 只构建 production module 并组装基于固定官方 PostgreSQL 18.4 digest 的 runtime image；测试、扫描、临时 cluster 和 CI policy 由 Actions 直接编排。
-- 每个成功的 `main` commit 只构建并发布一次公开 GHCR candidate，同时生成 source-bound metadata、release manifest、SBOM、provenance 和 attestation。
-- Gomtmui 只按完整 OCI digest 消费 candidate，并在远端环境验证 PostgreSQL、OAuth、identity、ACL/RLS、依赖服务和 rollback。
-- Stable promotion 只给同一已验收 candidate digest 增加 SemVer/`latest` alias并创建 immutable GitHub Release，不运行 Cargo 或 Docker build。
-- 重写 proposal、design、delta specs、tasks 与维护文档，删除临时分支、本地 Docker、独立 cold authority 和强制 PR 治理的过时描述。
+- **BREAKING**：删除 `SECURITY.md`、`CONTRIBUTING.md`、`examples/` 和历史性 `docs/evidence/`；清理所有失效引用，并把仍被真实集成测试使用的最小 OAuth fixture 移入测试支持代码。
+- **BREAKING**：源码不再固定 Rust/PostgreSQL patch、Docker base digest、Cargo 依赖精确版本、GitHub Action commit SHA 或扫描工具 archive hash，也不再用测试批准这些字面值。
+- Rust 跟随 `stable`，PostgreSQL 跟随当前支持的 PG18 major 内最新稳定 minor，Cargo 使用兼容版本范围，Actions 使用稳定 major tag；PostgreSQL major 升级仍作为显式 ABI 兼容变更处理。
+- 每次 `main` CI 在开始时只解析一次实际工具链、依赖锁文件和 image digest；测试、production build 和 candidate 发布复用该解析结果，并把实际值记录到 release manifest、SBOM、provenance 与 attestation，而不是与源码内预设 hash 比较。
+- 精简 `build.rs`、`scripts/`、`tests/`、Dockerfile、workflow 和维护文档；删除历史回溯、入口自测、实现字面量、精确 layer/config 相等和重复负向矩阵，只保留领域规则、ABI layout、真实 PostgreSQL OAuth、production module 与最终 image 启动验证。
+- `main` 继续作为唯一源码集成线，所有构建、测试、临时 PostgreSQL 和 image 验证继续只在 GitHub Actions 执行；失败 commit 保留，但不得产生可消费 candidate 或 stable release。
+- mtmpg SemVer 成为用户可见的发布与消费身份；OCI digest 仍由 CI 解析并绑定到证据，用于证明 candidate、gomtmui 验收和 stable promotion 指向同一不可变制品，但不作为上游技术栈版本写死在源码中。
 
 ## Capabilities
 
 ### New Capabilities
 
-- `pggomtm-validator-module`：PostgreSQL 18 OAuth validator 的 ABI、离线验证、role、identity 和失败边界。
-- `pggomtm-release-supply-chain`：main-first Actions CI/CD、标准 PostgreSQL 18.4 派生镜像、公开 GHCR、不可变发布和 gomtmui 消费契约。
+- `pggomtm-validator-module`：PostgreSQL 18 OAuth validator 的 ABI、离线验证、role、identity、失败边界和最新 PG18 minor 兼容要求。
+- `pggomtm-release-supply-chain`：精简仓库、latest-compatible Actions CI/CD、版本化 PostgreSQL image、标准供应链证据和 gomtmui 消费契约。
 
 ### Modified Capabilities
 
@@ -27,7 +25,7 @@
 
 ## Impact
 
-- `codeh007/mtmpg` 的远端 `main`、GitHub Actions、Dockerfile、测试入口、供应链脚本和维护文档将统一到 Actions-only 模型。
-- 本地工作区只承担源码与规划编辑、Git/OpenSpec 操作和只读调查；既有本地诊断 container/image 将按精确名称清理，不执行宽泛 prune。
-- `codeh007/mtmpg` 仍是 Rust module、测试和 image 的唯一权威；gomtmui 不保留 Rust 副本、第二 Dockerfile、本地 image fallback 或现场编译路径。
-- Gomtmui 最终只替换 `docker-compose.yml` 中 PostgreSQL image 的完整 digest；真实 E2E 由远端 workflow 执行，不修改生产数据库、生产配置或生产流量。
+- `codeh007/mtmpg` 的 `Cargo.toml`、`Cargo.lock` 策略、`rust-toolchain.toml`、`build.rs`、Dockerfile、Actions、测试、脚本、文档和 OpenSpec 将统一到精简且 latest-compatible 的模型。
+- 已完成的固定 PG18.4/digest image 和严格 image readiness 工作不再代表目标状态；必须按新契约重新实现并取得远端 Actions 结果。
+- Gomtmui 不构建 Rust module，按 mtmpg SemVer 选择 candidate/stable；验收证据在运行时记录其 OCI digest、mtmpg source 和 gomtmui source。
+- 不修改生产数据库、生产配置或生产流量，也不恢复任何本地 Docker build/run 或原生重计算路径。

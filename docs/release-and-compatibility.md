@@ -1,218 +1,86 @@
 # pggomtm 发布与兼容契约
 
-本页定义公开 `pggomtm` 仓库的版本、制品、兼容、candidate 验收、stable promotion 和回退契约。公开的 `main` 是开发主线，不表示 stable。当前仓库尚无 Git tag、GitHub Release 或 GitHub Container Registry（GHCR）package；后续条款区分已经通过的 module/image 门禁和仍未实现的发布能力。
+公开`main`是开发主线，不表示stable。mtmpg尚未完成首个可消费candidate或stable；发布状态以GitHub Release、GHCR和对应attestation为准。
 
-## 当前状态与本文效力
+## 版本域
 
-当前仓库具备已验证 validator 与 artifact readiness，但没有可消费 release。本页是发布规范，不是已发布制品清单：
+三个版本域相互独立：
 
-- `Cargo.toml` 中的 `0.1.0` 只是当前 crate 元数据，不代表已经发布 `v0.1.0`。
-- 仓库尚未创建 stable tag、GitHub Release 或可供部署固定的 GHCR 开放容器计划（Open Container Initiative，OCI）摘要。
-- 仓库已经public，完整开发基线已进入`main`；main是持续演进的源码线，不保证每个SHA都可发布。
-- 正常构建在外部材料和claims全部合规时授权并返回PostgreSQL allocator分配的版本化`authn_id`，tampered或不合规token保持未授权。
-- 当前无gate startup已经从外部只读 config 和 JSON Web Key Set（JWKS）建立每backend verifier snapshot，验证同文件系统原子轮换与既有snapshot隔离，并由正式validate callback消费该snapshot。
-- Database token矩阵已经覆盖OAuth client与API-key credential actor、三种profile、authority version、ID/time边界、algorithm、audience/scope与tampered signature；closed role与forbidden-role门禁已经取得[远端CI证据](evidence/issue-116/native-ci-bootstrap.md)，allocator与decoded identity往返已取得[真实libpq证据](evidence/issue-116/production-identity-roundtrip.md)，稳定reason与日志脱敏也已取得[远端可观察性证据](evidence/issue-116/authentication-failure-observability.md)。
-- Production build已经验证normal dependency tree、production源码、ELF动态依赖/未解析符号与敏感字符串不包含HTTP/DNS、libcurl/libpq、SQL/SPI、私钥加载、service credential、在线introspection或issuer fallback能力。
-- Final image 已通过 ELF export、arch/libc、module 位置、官方 entrypoint、base filesystem 差异与内部 build manifest 门禁；精确远端结果见[artifact readiness证据](evidence/issue-116/artifact-readiness-gate.md)。
-- Runtime只接受PostgreSQL 18 major；当前build/test identity仍精确固定18.4，尚未独立构建或验证18.5，因此不得把现有artifact部署到18.5。
-- PG18.4的loader、allocator、callback和真实libpq `OAUTHBEARER`正负向smoke已通过；复验范围与限制见[PG18.4 runtime/OAuth证据](evidence/issue-116/pg18.4-runtime-oauth-smoke.md)。
-- 每个Cargo feature组合已生成并嵌入`pggomtm-build-identity/v1`规范JSON及其SHA-256。正式image包含`pggomtm-build-manifest/v2`，绑定精确source、实际`.so`与MIT LICENSE checksum，但不包含image自身OCI digest。
-- `release-manifest.json` 与 release workflow 尚未实现。
-
-未来候选和 stable 发布必须满足本文全部适用门禁。任何缺失、未知或不匹配的发布事实都按不兼容处理。
-
-正式runtime必须遵循[固定路径与版本化配置契约](runtime-configuration.md)。Release不得通过环境变量、PostgreSQL GUC或启动参数增加第二个配置入口。
-
-## 远端持续集成证据契约
-
-`.github/workflows/native-ci.yml`是重计算和证据权威，直接编排Rust、官方ABI、真实PostgreSQL integration、production artifact与最终image检查。根`Dockerfile`只构建production module并组装固定官方PostgreSQL 18.4 runtime image。只有关联精确远端commit的成功GitHub Actions run可以完成OpenSpec task、gomtmui consumer gate或发布门禁。
-
-本地不得运行Cargo或原生编译、Docker build/run、临时PostgreSQL cluster和最终image检查。`main` push与可选Pull Request（PR）lane可使用内容寻址cache；PR始终只读。仓库不维护临时feature trigger、scheduled cold lane或独立无缓存发布仪式。
-
-历史bootstrap及其日志最小化复验记录在[Native CI bootstrap证据](evidence/issue-116/native-ci-bootstrap.md)。该证据只描述当时状态，不替代当前`main` SHA的远端门禁。
-
-## 三种版本不得混用
-
-发布同时携带三个独立版本域。每个版本只描述自己的契约：
-
-| 版本域 | 表示方式 | 描述对象 |
+| 版本 | 当前形式 | 作用 |
 | --- | --- | --- |
-| Module 语义化版本（Semantic Versioning，SemVer） | `MAJOR.MINOR.PATCH`，Git tag 增加 `v` 前缀 | crate、源码与整个发布 |
-| `database-token` contract | manifest 中的整数，初始值为 `1` | Database JSON Web Token（JWT）的字段和验证语义 |
-| `authn-id` contract | identity 编码前缀，当前为 `pggomtm:v1` | `authn_id` 的编码与解析 |
+| mtmpg SemVer | `MAJOR.MINOR.PATCH` | 用户选择的module/image release |
+| Database token contract | integer `1` | JWT字段和验证语义 |
+| Authn ID contract | `pggomtm:v1` | `authn_id`编码与解析 |
 
-`authority_version` 不是上述任一 contract version。它是 token 和 identity 中单个授权状态的版本，用于归因与授权状态演进。
+Database token contract 1 固定ES256、唯一issuer/audience、`database` scope、30至300秒TTL、deny-unknown claims、actor二选一以及closed profile-role：
 
-### Module SemVer
-
-Module SemVer 标识一次完整发布。Git、crate 和 Release 必须使用同一个版本：
-
-- Stable Git tag 使用 `vMAJOR.MINOR.PATCH`，例如 `v1.2.3`。
-- `Cargo.toml` crate version、manifest module version 和 GitHub Release version 必须去除或增加 `v` 后精确对应。
-- Prerelease 使用 `v0.1.0-alpha.N` 或 `v0.1.0-rc.N`，其中 `N` 是递增正整数。
-- `1.0.0` 前，任何 contract breaking 变更至少提升 minor，并显式协调所有 consumer。
-- `1.0.0` 前后，patch 都不得破坏已经发布的 contract。
-- `1.0.0` 后，任何 contract breaking 变更必须提升 major。
-
-Module SemVer 变化不能替代下述 contract version 变化。一次发布可以同时提升 module、`database-token` 和 `authn-id` 版本。
-
-带 prerelease module version 的 artifact 永远不能改标为 stable。例如，`0.1.0-alpha.1` 与 `0.1.0` 是不同 module version，二者必须使用不同构建和 OCI digest。
-
-### Database token contract
-
-首个未来 `release-manifest.json` 必须声明 `database-token` contract integer `1`。Contract `1` 固定以下验证语义：
-
-- Claims schema 使用 deny-unknown，并要求完整字段集合。
-- 签名算法固定为 `ES256`，不得接受替代算法。
-- `issuer` 和 `audience` 必须分别精确匹配配置的唯一超文本传输安全协议（HTTPS）资源。
-- `scope` 必须精确等于 `database`。
-- Token 生存时间不得少于 `30s`，且不得超过 `300s`。
-- Actor 必须恰好选择一种：OAuth 的 `client_id` 或应用程序编程接口（API）key 的 `credential_id`。
-- `auth_method`、actor 字段和 identity 归因必须一致。
-- `db_profile` 和 `db_role` 必须使用下表的闭集映射。
-
-Contract `1` 的 profile 与 PostgreSQL role 映射如下：
-
-| `db_profile` | `db_role` |
+| `db_profile` | PostgreSQL role |
 | --- | --- |
 | `ordinary` | `gomtm_candidate_ordinary` |
 | `business-admin` | `gomtm_candidate_business_admin` |
 | `database-developer` | `gomtm_candidate_database_developer` |
 
-任何 token 字段、字段语义、profile-role 映射、算法或 deny-unknown schema 变化都必须提升 contract integer。新 contract 必须随发布提供版本化正向和负向测试向量，不得原地改变整数 `1` 的含义。
+改变token字段、算法、profile-role或identity编码时必须提升对应contract；不得原地改变已发布版本语义。
 
-### Authn ID contract
+## 平台兼容
 
-当前identity codec使用`pggomtm:v1`前缀。该前缀标识`authn_id`的字段、顺序、分隔、规范编码和解析规则；production verifier已经使用该版本化identity，未知前缀仍fail closed。
+当前支持边界是PostgreSQL 18 major、Linux amd64、Debian bookworm/glibc和Rust stable。每次CI解析PG18稳定通道的当前minor，并让development header、ABI、真实PG integration和最终runtime使用同一结果。
 
-任何编码或解析变化都必须使用新前缀，例如 `pggomtm:v2`。发布不得静默改变 `pggomtm:v1`，也不得把未知前缀解释为 `v1`。
+Release材料必须记录实际Rust、Cargo依赖、pgrx、PostgreSQL minor/header、builder/runtime digest、target、架构、libc、module和OCI digest。这些值是该release的观测事实，不是源码中下一次构建的预批准pin。
 
-## 首发 PostgreSQL 与 runtime 变体
+PostgreSQL major、架构、libc或runtime发行版变化需要新代码和完整真实验证。消费者不得把PG18 artifact用于其他major。
 
-首个可发布变体只覆盖一个精确构建和运行组合。它不授权同一 PostgreSQL major 的其他 minor：
+## Candidate
 
-| 维度 | 首发值 |
-| --- | --- |
-| PostgreSQL build 与 test minor | `18.4` |
-| `PG_VERSION_NUM` | `180004` |
-| Runtime 发行版 | Debian bookworm |
-| 操作系统 | Linux |
-| 架构 | amd64 |
-| C library | glibc |
-| Rust target | `x86_64-unknown-linux-gnu` |
+Candidate使用不可覆盖的SemVer prerelease tag，例如：
 
-每次构建和真实测试必须精确记录 PostgreSQL minor、OAuth header digest 与 runtime base image digest。Manifest 还必须把这些值绑定到对应 source commit 和 OCI digest。
+```text
+ghcr.io/codeh007/mtmpg-postgres:0.1.0-rc.123456
+```
 
-未来 PostgreSQL 18 minor 只有经过独立构建、真实 loader 与 OAuth 验证后，才能作为新变体发布。Consumer 不得把只验证 PostgreSQL 18.4 的 artifact 自行用于 PostgreSQL 18.5，即使未来 module runtime 改为接受 PostgreSQL 18 major。
+Native CI按以下顺序生成candidate：
 
-## 命名与不可变制品身份
+1. 从精确main source解析一次Cargo.lock、toolchain、PG18和浮动image digest。
+2. 复用该解析结果运行领域、ABI、真实PG18和final-image门禁。
+3. 只构建一次production image并物化OCI archive。
+4. 只读job验证archive并上传Cargo.lock、`resolved-inputs.json`和测试结果。
+5. 最小写权限publish job推送同一archive，不运行Cargo或Docker build。
+6. Push后生成release manifest、SBOM、provenance、attestation和checksums。
 
-名称只帮助发现制品，不能作为部署身份。Bundle 模式固定为 `pggomtm-<version>-pg18.4-linux-amd64-glibc.tar.zst`：
+Candidate tag、source和OCI digest必须一一对应，已有tag不得覆盖。PR、fork、失败main和重复version不得写package或发布材料。
 
-| 对象 | 示例 |
-| --- | --- |
-| Prerelease Git tag | `v0.1.0-alpha.1` |
-| Prerelease OCI version tag | `ghcr.io/codeh007/mtmpg-postgres:0.1.0-alpha.1-pg18.4-bookworm` |
-| Stable candidate 的缩短 source commit hash tag | `ghcr.io/codeh007/mtmpg-postgres:sha-1a2b3c4-pg18.4-bookworm` |
-| Stable OCI version tag | `ghcr.io/codeh007/mtmpg-postgres:0.1.0-pg18.4-bookworm` |
-| Stable bundle | `pggomtm-0.1.0-pg18.4-linux-amd64-glibc.tar.zst` |
+## Consumer验收
 
-`sha-1a2b3c4` 表示一个缩短的 source commit hash。Stable candidate 只发布该发现 tag，但其 crate、module 和 manifest 已使用冻结的最终 `0.1.0` version。
+Gomtmui按candidate SemVer配置PostgreSQL image，并在远端解析实际OCI digest。Consumer evidence必须绑定mtmpg version/source/manifest/module/OCI digest与gomtmui source，并覆盖：
 
-Git tag、OCI tag 和 `latest` 都只能用于发现。部署必须使用完整 OCI digest，例如 `ghcr.io/codeh007/mtmpg-postgres@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef`。
+- 官方initdb、volume、healthcheck与PG18启动
+- TLS、sub2api与pgAdmin连接
+- Production module从真实`pkglibdir`加载
+- Database JWT allow/deny、profile-role和`system_user`
+- Ordinary、business-admin、database-developer的ACL/RLS
+- 切回上一已验证version的rollback
 
-上述 64 位十六进制值是明显非真实的格式占位，不对应任何已发布 image。Release、manifest 和部署配置不得包含 registry 凭据。
+失败时保持上一version，mtmpg通过新main commit发布新candidate；不得覆盖失败candidate或增加本地fallback。
 
-目标package`ghcr.io/codeh007/mtmpg-postgres`将公开读取。匿名pull不需要private credential，也不授予写、删除、改标或Release权限；package写权限只属于仓库自身成功`main` push的candidate job。公开读取、candidate可用与stable支持是三个不同状态。
+## Stable promotion
 
-## Release manifest 契约
+Stable promotion只接受已经通过mtmpg和gomtmui全部证据的candidate digest。Promotion不得解析新依赖、运行Cargo或构建image，只能：
 
-当前build script生成`pggomtm-build-identity/v1`，正式image包含`pggomtm-build-manifest/v2`。内部manifest记录source repository/revision、module version、唯一production feature、Rust/pgrx/JOSE、PostgreSQL source/header/bindings/runtime base、target、OS、architecture、libc、实际`.so`与MIT LICENSE checksum；它不得包含image自身OCI digest。
+1. 为同一digest增加稳定SemVer与`latest`tag。
+2. 创建指向candidate source的精确Git tag和immutable GitHub Release。
+3. 发布同一Cargo.lock、resolved inputs、manifest、SBOM、provenance、checksums和consumer evidence。
 
-Trusted candidate workflow 在 OCI digest 产生后生成外部 `release-manifest.json`，加入 remote source commit、contract、test minor、最终 `.so`/OCI digest、验证矩阵、软件物料清单（SBOM）与 attestation。Workflow 不得重建 image 或改写内部 manifest 来补写 digest。
+用户使用mtmpg SemVer交流和升级；OCI digest用于机器校验candidate、consumer evidence和stable是否为同一bytes。Tag、Release和asset创建后不得覆盖。
 
-未来 `release-manifest.json` 必须提供不可变、可比较的发布事实。它至少记录以下字段：
+## 升级与rollback
 
-- Source commit、module version、`database-token` contract integer 和 `authn-id` version。
-- Rust、pgrx 与 JSON Object Signing and Encryption（JOSE）版本。
-- PostgreSQL build minor、test minor 与 `PG_VERSION_NUM`。
-- OAuth header digest 与 runtime base image digest。
-- Rust target、操作系统、架构与 libc。
-- `.so` digest、OCI digest 与完整验证矩阵。
+每次切换都以完整mtmpg image为单位：
 
-GitHub Release 还必须提供与 manifest 一致的 `SHA256SUMS`、MIT license、软件物料清单（software bill of materials，SBOM）和 provenance。Manifest、checksum、Release asset 与 attestation 创建后不得覆盖。
+1. 停止接收新连接并排空旧PostgreSQL backend。
+2. 切换到目标mtmpg SemVer。
+3. 启动全部backend，验证实际digest、PG18、module、OAuth、role和identity。
+4. 失败时排空backend并切回上一已验证version。
 
-gomtmui 在更新消费 digest 前必须验证全部 manifest 字段。它还必须验证 issuer、profile、platform 和版本化正负向 token、role、identity 测试向量。
+不得热覆盖`.so`、现场编译、恢复第二份源码或增加旧认证fallback。Validator只在连接认证时检查token；token到期或授权撤销不会自动终止既有backend。
 
-## Prerelease 与 stable candidate 的独立顺序
-
-带 prerelease module version 的 alpha 或 release candidate（RC）只能验证 pipeline 和早期 contract。它永远不能直接增加 stable version tag、stable GitHub Release 或 `latest`，也不能作为 stable digest 晋级。
-
-Alpha 或 RC 使用与其 prerelease module version 一致的 crate、manifest、Git tag 和 OCI version tag。准备 stable 时，维护者必须创建冻结最终 version 的新 commit，并产生新的构建与 OCI digest。
-
-Stable candidate必须按以下顺序从`main`的精确最终version commit晋级：
-
-1. 把冻结的`MAJOR.MINOR.PATCH`、contract、manifest schema与文档作为范围单一commit直接非force推进到`main`，让crate、module和manifest version精确一致。
-2. Candidate workflow只从该精确`main` commit构建并push一次，并只发布`sha-<short_commit>`发现tag、完整OCI digest、外部manifest、SBOM与attestation。
-3. Candidate 阶段不得发布 stable Git tag、OCI stable version tag、stable GitHub Release 或 `latest`。
-4. mtmpg native/security/supply-chain门禁与gomtmui端到端（end-to-end，E2E）验收使用相同source commit、manifest和OCI digest。
-5. 验收期间`main`可以继续接收后续commit；candidate只有在其source commit仍是`main`未改写祖先且全部证据仍一致时才能晋级。
-6. 全部门禁通过后，trusted promotion workflow 为同一已验收 OCI digest 增加 stable alias，创建指向 candidate source commit 的 Git tag 与 immutable GitHub Release。
-
-创建 stable tag 和 Release 不得触发重建。后续环境必须晋级同一 OCI digest，不能从 tag 重建等价制品。
-
-## Stable 发布门禁
-
-Stable 表示完整发布门禁全部通过，不表示进入 `main`、公开 pull 或单项 module/image 测试成功。以下矩阵必须全部成立：
-
-- Production feature 从外部只读 config 和 public JWKS 建立并在正式 validate callback 中使用 verifier，不依赖内置材料。
-- 最终 artifact 不包含 `abi-gate`、`abi-runtime-gate`、`pgx-oauth-gate`、测试 key、token、probe 或认证 fallback。
-- 精确首发变体通过 native build、应用程序二进制接口（ABI）、loader、allocator、callback、ELF 与 final filesystem 门禁。
-- 真实 PostgreSQL 18 OAuth allow 与 deny、role 和 identity 正负向矩阵全部通过。
-- Dependency、license、动态链接、source secret与最终image扫描全部通过。
-- SBOM、binary 与 container provenance 和 attestation 全部生成并验证。
-- gomtmui 对相同 source commit 和 OCI digest 的 candidate E2E 全部通过。
-- Immutable manifest、bundle、checksum、OCI digest 和验证矩阵完全一致。
-- 新 digest 与上一已验证 digest 的升级和 rollback 演练通过。
-
-任一门禁缺失或失败都必须阻止 stable Release 和 `latest` 更新。流程不得通过弱化扫描、移除失败证据或改用另一构建结果继续发布。
-
-## 升级、环境晋级与 rollback
-
-升级和 rollback 都以完整 immutable OCI digest 为最小单位。每次切换按以下顺序执行：
-
-1. 停止接收新连接并排空受影响的 PostgreSQL backend，等待旧 backend 全部退出。
-2. 把整个 runtime image 引用切换到目标完整 OCI digest。
-3. 启动或重建全部 backend，再验证实际 PostgreSQL、module、OAuth、role 和 identity。
-4. 后续环境重复相同步骤，并晋级同一个 OCI digest。
-
-切换失败时，平台先停止或排空 backend，再切回上一已验证 digest，最后重启并验证。mtmpg 必须通过新版本修复前进，不能覆盖失败版本。
-
-发布与部署禁止以下操作：
-
-- 在仍有 backend 运行时热覆盖 `.so`。
-- 在目标主机安装 Rust 或现场编译 module。
-- 在消费仓库恢复第二份源码或本地 rebuild 路径。
-- 增加旧 verifier、旧协议适配器、备用 issuer 或其他认证 fallback。
-- 使用 `latest`、version tag 或缩短的 source commit hash tag 代替完整部署 digest。
-
-Validator 只在连接认证时检查 token。Token 到期或授权撤销不会自动终止已经建立的 backend，平台必须通过连接排空或其他会话生命周期控制结束它。
-
-## Consumer 兼容决策
-
-Consumer 只接受与目标环境和自身契约完全匹配的 manifest。以下任一维度缺失、未知或不匹配时都必须 fail closed：
-
-| 维度 | 必须满足的条件 | 不匹配时的动作 |
-| --- | --- | --- |
-| Module SemVer | 与所选 Release、manifest 和批准版本精确一致 | 拒绝 candidate |
-| `database-token` contract | 与 issuer 支持的整数精确一致 | 拒绝 token 与 artifact |
-| `authn-id` version | 与 identity consumer 支持的前缀精确一致 | 拒绝 artifact |
-| PostgreSQL minor | 与 manifest 的 build 和 test minor 精确一致 | 拒绝部署 |
-| Rust target 与架构 | 与目标 Linux amd64 平台精确一致 | 拒绝部署 |
-| libc | 与目标 glibc runtime 精确一致 | 拒绝部署 |
-| Runtime base digest | 与已验证 base image digest 精确一致 | 拒绝部署 |
-| OCI digest 与验证矩阵 | Digest、manifest 和成功矩阵相互一致 | 拒绝晋级 |
-
-Consumer 不得用本地 rebuild、旧协议适配或可变 tag 修复不匹配。缺少兼容变体时，mtmpg 必须先发布新版本、新 manifest、新测试向量和新 OCI digest。
-
-后续 release 工作由[mtmpg #1](https://github.com/codeh007/mtmpg/issues/1)跟踪，并反向链接 gomtmui 的跨仓库 Issue。Issue 记录协作与证据，OpenSpec 继续定义完成条件。
+发布工作由[mtmpg #1](https://github.com/codeh007/mtmpg/issues/1)和active OpenSpec change跟踪。

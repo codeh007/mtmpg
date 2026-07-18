@@ -77,7 +77,7 @@ main(int argc, char **argv)
 		if (!expect_allowed &&
 			rejected_connection_is_redacted(error, expect_startup_reason))
 		{
-			printf("PG18.4 OAuth rejection smoke passed\n");
+			printf("PG18 OAuth rejection smoke passed\n");
 			status = EXIT_SUCCESS;
 		}
 		else
@@ -93,7 +93,7 @@ main(int argc, char **argv)
 
 	status = verify_authenticated_session(conn, expected_role, system_user_path);
 	if (status == EXIT_SUCCESS)
-		printf("PG18.4 OAuth allow, role and system_user smoke passed\n");
+		printf("PG18 OAuth allow, role and system_user smoke passed\n");
 
 done:
 	if (conn != NULL)
@@ -219,9 +219,9 @@ verify_authenticated_session(PGconn *conn, const char *expected_role,
 		strncmp(PQgetvalue(result, 0, 0), "oauth:pggomtm:v1;",
 				strlen("oauth:pggomtm:v1;")) != 0 ||
 		strcmp(PQgetvalue(result, 0, 1), expected_role) != 0 ||
-		strcmp(PQgetvalue(result, 0, 2), "180004") != 0)
+		strncmp(PQgetvalue(result, 0, 2), "18", 2) != 0)
 	{
-		fprintf(stderr, "OAuth session identity or PG18.4 runtime did not match\n");
+		fprintf(stderr, "OAuth session identity or PG18 runtime did not match\n");
 		goto done;
 	}
 	status = write_system_user_fixture(system_user_path,

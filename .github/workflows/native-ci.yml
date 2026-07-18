@@ -17,122 +17,240 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUILDX_METADATA_PROVENANCE: "disabled"
-  DOCKER_BUILD_RECORD_UPLOAD: "false"
-  DOCKER_BUILD_SUMMARY: "false"
-  PGGOMTM_NATIVE_CONTAINER: pggomtm-native-${{ github.run_id }}-${{ github.run_attempt }}
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target
+  PGRX_PG_CONFIG_PATH: /usr/lib/postgresql/18/bin/pg_config
 
 jobs:
-  native-ci:
-    name: Native CI gates
+  verify:
+    name: Resolve, test and build candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 120
 
     steps:
       - name: Checkout exact source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify clean source identity
+      - name: Verify source identity
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
 
-      - name: Install pinned public-readiness scanner
-        shell: bash
-        run: scripts/public-readiness install-gitleaks "$RUNNER_TEMP/public-readiness-bin"
-
-      - name: Verify source public readiness
-        shell: bash
+      - name: Scan source and history for secrets
+        uses: gitleaks/gitleaks-action@v2
         env:
-          PGGOMTM_GITLEAKS_BIN: ${{ runner.temp }}/public-readiness-bin/gitleaks
-        run: scripts/public-readiness scan-source "$GITHUB_WORKSPACE"
+          GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Verify native container entrypoint policy
+      - name: Install current PG18 development tools
         shell: bash
-        run: tests/native_container_entrypoint.sh
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            binutils \
+            ca-certificates \
+            clang \
+            curl \
+            gnupg \
+            jq \
+            libclang-dev \
+            libssl-dev \
+            pkg-config \
+            shellcheck \
+            skopeo
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor --batch --yes \
+                --output /usr/share/keyrings/postgresql.gpg
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            postgresql-client-18 \
+            postgresql-server-dev-18
 
-      - name: Verify native test entrypoint policy
+      - name: Resolve latest-compatible inputs once
         shell: bash
-        run: tests/native_test_entrypoint.sh
+        run: |
+          set -euo pipefail
+          rustup set profile minimal
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup component add clippy rustfmt
+          cargo generate-lockfile
 
-      - name: Verify PostgreSQL integration entrypoint policy
-        shell: bash
-        run: tests/postgres_integration_entrypoint.sh
+          docker pull rust:bookworm >/dev/null
+          docker pull postgres:18-bookworm >/dev/null
+          rust_image="$(docker image inspect --format '{{ index .RepoDigests 0 }}' rust:bookworm)"
+          postgres_image="$(docker image inspect --format '{{ index .RepoDigests 0 }}' postgres:18-bookworm)"
+          host_rust="$(rustc --version)"
+          image_rust="$(docker run --rm --entrypoint rustc "$rust_image" --version)"
+          test "$host_rust" = "$image_rust"
 
-      - name: Verify image readiness entrypoint policy
-        shell: bash
-        run: tests/image_readiness_entrypoint.sh
+          host_postgres="$("$PGRX_PG_CONFIG_PATH" --version)"
+          image_postgres="$(docker run --rm "$postgres_image" postgres --version)"
+          host_minor="$(grep --only-matching --extended-regexp '18\.[0-9]+' <<<"$host_postgres" | head -n 1)"
+          image_minor="$(grep --only-matching --extended-regexp '18\.[0-9]+' <<<"$image_postgres" | head -n 1)"
+          test -n "$host_minor"
+          test "$host_minor" = "$image_minor"
 
-      - name: Create pinned native toolchain container
-        shell: bash
-        run: scripts/native-container create
+          base_version="$(cargo metadata --locked --no-deps --format-version 1 | jq --raw-output '.packages[0].version')"
+          candidate_version="${base_version}-rc.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+          lock_sha256="$(sha256sum Cargo.lock | cut -d' ' -f1)"
+          header_sha256="$(sha256sum "$($PGRX_PG_CONFIG_PATH --includedir-server)/libpq/oauth.h" | cut -d' ' -f1)"
+          pgrx_version="$(cargo metadata --locked --format-version 1 | jq --raw-output '.packages[] | select(.name == "pgrx") | .version' | head -n 1)"
 
-      - name: Prepare pinned native toolchain
-        shell: bash
-        run: scripts/native-container prepare
+          jq --null-input \
+            --arg source "$GITHUB_SHA" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg version "$candidate_version" \
+            --arg rust "$host_rust" \
+            --arg cargo "$(cargo --version)" \
+            --arg pgrx "$pgrx_version" \
+            --arg postgres "$host_minor" \
+            --arg pg_config "$host_postgres" \
+            --arg rust_image "$rust_image" \
+            --arg postgres_image "$postgres_image" \
+            --arg lock_sha256 "$lock_sha256" \
+            --arg header_sha256 "$header_sha256" \
+            '{
+              schema: "mtmpg-resolved-inputs/v1",
+              source: $source,
+              workflow: {run_id: $run_id, run_attempt: $run_attempt},
+              version: $version,
+              rust: {compiler: $rust, cargo: $cargo, builder: $rust_image},
+              pgrx: $pgrx,
+              postgresql: {minor: $postgres, pg_config: $pg_config, runtime: $postgres_image, oauth_header_sha256: $header_sha256},
+              cargo_lock_sha256: $lock_sha256
+            }' >resolved-inputs.json
 
-      - name: Verify shell and source policies
-        shell: bash
-        run: scripts/native-container exec policy
+          {
+            echo "RUST_IMAGE=$rust_image"
+            echo "POSTGRES_IMAGE=$postgres_image"
+            echo "POSTGRES_MINOR=$host_minor"
+            echo "CANDIDATE_VERSION=$candidate_version"
+          } >>"$GITHUB_ENV"
 
       - name: Audit dependencies and licenses
-        shell: bash
-        run: scripts/native-container exec dependencies
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --locked --no-default-features --features pg18
+          command-arguments: --show-stats advisories licenses bans sources
 
-      - name: Verify official OAuth ABI provenance
+      - name: Verify shell and generated ABI
         shell: bash
-        run: scripts/native-container exec abi
+        run: |
+          set -euo pipefail
+          shellcheck tests/*.sh
+          include_dir="$($PGRX_PG_CONFIG_PATH --includedir-server)"
+          read -r -a cppflags <<<"$($PGRX_PG_CONFIG_PATH --cppflags)"
+          cc -std=c11 -Wall -Wextra -Werror \
+            "${cppflags[@]}" \
+            -I"$include_dir" \
+            tests/oauth_layout_probe.c \
+            -o "$RUNNER_TEMP/pggomtm-oauth-layout-probe"
+          "$RUNNER_TEMP/pggomtm-oauth-layout-probe"
 
-      - name: Run Rustfmt and Clippy
+      - name: Run Rust quality and domain tests
         shell: bash
-        run: scripts/native-container exec quality
+        run: |
+          set -euo pipefail
+          cargo fmt --check
+          cargo clippy --locked --all-targets --no-default-features \
+            --features pg18,abi-gate,pgx-oauth-gate -- -D warnings
+          cargo clippy --locked --lib --no-default-features \
+            --features pg18,abi-runtime-gate -- -D warnings
+          cargo clippy --locked --lib --no-default-features \
+            --features pg18 -- -D warnings
+          cargo test --locked --no-default-features --features pg18,abi-gate
+          cargo test --locked --no-default-features \
+            --features pg18,abi-gate,pgx-oauth-gate \
+            --test pgx_oauth_gate
+          cargo test --locked --no-default-features --features pg18
 
-      - name: Run Cargo test matrices
+      - name: Stage and run real PG18 matrices
         shell: bash
-        run: scripts/native-container exec cargo-tests
-
-      - name: Verify production module
-        shell: bash
-        run: scripts/native-container exec production-artifact
-
-      - name: Stage PostgreSQL integration artifacts
-        shell: bash
-        run: scripts/native-container exec stage-integration
-
-      - name: Run PostgreSQL 18.4 integration matrices
-        shell: bash
-        run: tests/postgres_integration.sh run target/native-integration
-
-      - name: Remove native toolchain container
-        if: ${{ always() }}
-        shell: bash
-        run: scripts/native-container destroy
+        env:
+          PGGOMTM_POSTGRES_IMAGE: ${{ env.POSTGRES_IMAGE }}
+        run: |
+          set -euo pipefail
+          tests/stage-integration.sh "$CARGO_TARGET_DIR/native-integration"
+          tests/postgres_integration.sh run "$CARGO_TARGET_DIR/native-integration"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        uses: docker/setup-buildx-action@v4
 
-      - name: Build final PostgreSQL image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+      - name: Build production OCI archive once
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
           pull: true
           push: false
-          load: true
           provenance: false
           sbom: false
-          tags: mtmpg-native-ci:${{ github.sha }}
+          outputs: type=oci,dest=${{ runner.temp }}/mtmpg-postgres.oci.tar
           build-args: |
+            RUST_IMAGE=${{ env.RUST_IMAGE }}
+            POSTGRES_IMAGE=${{ env.POSTGRES_IMAGE }}
+            POSTGRES_MINOR=${{ env.POSTGRES_MINOR }}
             SOURCE_REVISION=${{ github.sha }}
+            VERSION=${{ env.CANDIDATE_VERSION }}
           cache-from: type=gha,scope=mtmpg-native-ci
           cache-to: type=gha,mode=max,scope=mtmpg-native-ci
 
-      - name: Verify final PostgreSQL image
+      - name: Verify the exact production image
         shell: bash
-        run: scripts/image-readiness verify "mtmpg-native-ci:${GITHUB_SHA}" "$GITHUB_SHA"
+        run: |
+          set -euo pipefail
+          skopeo copy \
+            "oci-archive:$RUNNER_TEMP/mtmpg-postgres.oci.tar" \
+            "docker-daemon:mtmpg-native-ci:$GITHUB_SHA"
+          tests/image-readiness.sh \
+            "mtmpg-native-ci:$GITHUB_SHA" \
+            "$GITHUB_SHA" \
+            "$CANDIDATE_VERSION" \
+            "$CARGO_TARGET_DIR/native-integration"
+
+          container_id="$(docker create "mtmpg-native-ci:$GITHUB_SHA")"
+          docker cp \
+            "$container_id:/usr/lib/postgresql/18/lib/pggomtm.so" \
+            "$RUNNER_TEMP/pggomtm.so"
+          docker rm "$container_id" >/dev/null
+          jq --null-input \
+            --arg source "$GITHUB_SHA" \
+            --arg version "$CANDIDATE_VERSION" \
+            --arg resolved_inputs_sha256 "$(sha256sum resolved-inputs.json | cut -d' ' -f1)" \
+            --arg cargo_lock_sha256 "$(sha256sum Cargo.lock | cut -d' ' -f1)" \
+            --arg module_sha256 "$(sha256sum "$RUNNER_TEMP/pggomtm.so" | cut -d' ' -f1)" \
+            --arg oci_archive_sha256 "$(sha256sum "$RUNNER_TEMP/mtmpg-postgres.oci.tar" | cut -d' ' -f1)" \
+            '{
+              schema: "mtmpg-verified-candidate/v1",
+              source: $source,
+              version: $version,
+              resolved_inputs_sha256: $resolved_inputs_sha256,
+              cargo_lock_sha256: $cargo_lock_sha256,
+              module_sha256: $module_sha256,
+              oci_archive_sha256: $oci_archive_sha256
+            }' >candidate-metadata.json
+
+      - name: Upload verified candidate materials
+        uses: actions/upload-artifact@v4
+        with:
+          name: mtmpg-candidate-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            Cargo.lock
+            resolved-inputs.json
+            candidate-metadata.json
+            ${{ runner.temp }}/mtmpg-postgres.oci.tar
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

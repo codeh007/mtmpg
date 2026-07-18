@@ -7,7 +7,7 @@ features = ["pg18"]
 [advisories]
 git-fetch-with-cli = true
 ignore = [
-  { id = "RUSTSEC-2021-0127", reason = "serde_cbor 0.11.2 is an unmaintained pgrx 0.19.1 transitive dependency with no safe upgrade; reviewed 2026-07-17, recheck by 2026-08-17 and before any pgrx or stable release change; see docs/dependency-audit.md" },
+  { id = "RUSTSEC-2021-0127", reason = "serde_cbor is an unmaintained pgrx transitive dependency with no compatible replacement; recheck before each candidate" },
 ]
 
 [licenses]

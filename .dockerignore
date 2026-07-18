@@ -7,7 +7,5 @@
 !build.rs
 !rust-toolchain.toml
 !LICENSE
-!scripts/
-!scripts/build-metadata
 !src/
 !src/**

@@ -4,7 +4,7 @@ set -euo pipefail
 umask 077
 export LC_ALL=C
 
-readonly POSTGRES_IMAGE="postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296"
+readonly POSTGRES_IMAGE="${PGGOMTM_POSTGRES_IMAGE:-postgres:18-bookworm}"
 REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPOSITORY_ROOT
 readonly CONTAINER_ENTRYPOINT="${REPOSITORY_ROOT}/tests/postgres_integration_container.sh"

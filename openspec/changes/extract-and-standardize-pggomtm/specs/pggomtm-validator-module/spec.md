@@ -4,18 +4,22 @@
 `pggomtm` SHALL构建为由PostgreSQL `oauth_validator_libraries`加载的Rust `cdylib`，并 SHALL导出有效`PG_MODULE_MAGIC`与`_PG_oauth_validator_module_init`。它 MUST NOT依赖control文件、versioned SQL、`CREATE EXTENSION`或HTTP服务。
 
 #### Scenario: PostgreSQL加载module
-- **WHEN** PG18.4把`pggomtm.so`放入真实`pg_config --pkglibdir`并配置`oauth_validator_libraries='pggomtm'`
+- **WHEN** 当前受支持的PG18 runtime把`pggomtm.so`放入真实`pg_config --pkglibdir`并配置`oauth_validator_libraries='pggomtm'`
 - **THEN** server SHALL通过module magic、OAuth magic和callback table加载module，无需创建SQL对象
 
-### Requirement: OAuth ABI必须来自目标官方header
-构建 SHALL从目标`pg_config --includedir-server/libpq/oauth.h`生成最小allowlist Rust bindings，并 SHALL以官方C compiler验证size、offset和callback layout。被校验的bindings字节 SHALL原样成为最终编译输入；ambient formatter、手写struct或复制magic常量 MUST NOT成为第二权威。
+### Requirement: OAuth ABI必须来自本次目标PG18 header
+构建 SHALL从本次CI解析的目标`pg_config --includedir-server/libpq/oauth.h`生成最小allowlist Rust bindings，并 SHALL以官方C compiler验证size、offset和callback layout。构建 MUST NOT依赖手写struct、复制magic常量、预批准header/bindings hash或某个PostgreSQL minor的固定bindings文本。
 
-#### Scenario: Header或layout不匹配
-- **WHEN** header缺失、digest未批准、symbol缺失、bindings被后处理或C/Rust layout不一致
-- **THEN** build SHALL失败且不得回退手写ABI
+#### Scenario: 当前PG18 header生成有效ABI
+- **WHEN** CI使用当前PG18 development package构建module
+- **THEN** bindgen SHALL只生成所需OAuth类型和常量，且C/Rust layout、callback签名与最终编译输入 SHALL一致
+
+#### Scenario: Header或layout不兼容
+- **WHEN** 当前PG18 header缺失所需symbol、bindgen无法生成allowlist或C/Rust layout不一致
+- **THEN** build SHALL失败且不得回退到旧header digest、缓存bindings或手写ABI
 
 ### Requirement: pgrx必须保护PostgreSQL FFI边界
-Crate SHALL使用固定完整`pgrx`提供module magic、guard、PostgreSQL error和allocator语义，并 SHALL通过`pgrx::pg_sys`访问raw symbol。Panic、PostgreSQL ERROR、NULL或allocator失败 MUST在callback边界fail closed，不得产生未定义行为。
+Crate SHALL使用与当前稳定Rust和PG18兼容的`pgrx`提供module magic、guard、PostgreSQL error和allocator语义，并 SHALL通过`pgrx::pg_sys`访问raw symbol。Panic、PostgreSQL ERROR、NULL或allocator失败 MUST在callback边界fail closed，不得产生未定义行为。
 
 #### Scenario: Callback异常
 - **WHEN** startup、validate或shutdown发生panic、ERROR或非法输入
@@ -26,7 +30,7 @@ Crate SHALL使用固定完整`pgrx`提供module magic、guard、PostgreSQL error
 
 #### Scenario: Config或JWKS无效
 - **WHEN** 文件缺失、权限不安全、schema错误、kid重复、包含private key或资源配置非法
-- **THEN** startup SHALL fail closed且不得使用内置key、旧缓存、Web endpoint或备用issuer
+- **THEN** startup SHALL fail closed且不得使用内置key、旧cache、Web endpoint或备用issuer
 
 #### Scenario: 原子轮换public JWKS
 - **WHEN** 平台原子替换active与retiring public keys
@@ -61,12 +65,16 @@ Validator SHALL只接受固定ES256、唯一issuer/audience、database scope和3
 Candidate与stable module SHALL只启用production features，并 MUST排除gate callbacks、test fixtures、内置JWKS/key/token、probe symbols和fallback路径。Validator只在连接认证时检查token，不声称token过期或credential撤销会终止已建立backend。
 
 #### Scenario: 检查production module
-- **WHEN** CI扫描ELF、strings、dependencies和最终image
-- **THEN** artifact SHALL只包含正式validator能力，任何gate或secret fixture命中 SHALL阻止发布
+- **WHEN** CI检查最终module并在真实PG18 image中加载它
+- **THEN** artifact SHALL只包含正式validator能力，任何测试symbol、private material或fixture命中 SHALL阻止发布
 
-### Requirement: 部署支持必须以已验证PG18.4变体为准
-首个image SHALL精确记录并验证Rust、pgrx、PostgreSQL 18.4 source/header、官方runtime base digest、target和libc。Runtime MAY依赖PG18 major module magic和OAuth magic，但消费者 MUST只部署manifest明确验证的18.4 image digest。
+### Requirement: 部署支持必须跟随PG18最新稳定minor
+每次candidate构建 SHALL解析并使用PG18 major内当前最新稳定development/runtime，且构建、ABI测试、真实PostgreSQL测试和最终image MUST使用该次run记录的同一minor。Release evidence SHALL记录实际Rust、pgrx、PostgreSQL、header、module和runtime版本/digest，但源码与测试 MUST NOT预先批准某个PG18 minor或对应hash。
 
-#### Scenario: 消费者尝试其他minor或major
-- **WHEN** artifact被计划用于未验证的PG18 minor、PG17或PG19
-- **THEN** 发布/消费门禁 SHALL拒绝，并要求mtmpg重新构建和真实验证新变体
+#### Scenario: PG18发布新稳定minor
+- **WHEN** 浮动PG18通道解析到比上一release更新的稳定minor
+- **THEN** CI SHALL基于新header重新生成ABI、运行完整真实测试并只在成功后发布新的mtmpg candidate version
+
+#### Scenario: 消费者尝试其他major
+- **WHEN** artifact被计划用于PG17、PG19或其他未显式支持的major
+- **THEN** 发布/消费门禁 SHALL拒绝，并要求mtmpg增加对应feature、路径、ABI和真实运行验证

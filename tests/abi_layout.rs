@@ -1,22 +1,18 @@
-use std::ffi::CString;
+use std::ffi::{CString, c_char};
 use std::mem::{offset_of, size_of};
 #[cfg(feature = "abi-gate")]
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 
 use pggomtm::{
-    OAuthValidatorCallbacks, OAuthValidatorModuleInit, PG_OAUTH_HEADER_SHA256,
-    PG_OAUTH_VALIDATOR_MAGIC, PG18_VERSION_NUM, ValidatorModuleResult, ValidatorModuleState,
-    oauth_callbacks, server_version_is_supported,
+    OAuthValidatorCallbacks, OAuthValidatorModuleInit, PG_OAUTH_VALIDATOR_MAGIC, PG18_VERSION_NUM,
+    ValidatorModuleResult, ValidatorModuleState, ValidatorShutdownCB, ValidatorStartupCB,
+    ValidatorValidateCB, oauth_callbacks, server_version_is_supported,
 };
 
 #[test]
-fn rust_layout_matches_postgresql_18_4_oauth_header() {
-    assert_eq!(PG18_VERSION_NUM, 180_004);
-    assert_eq!(
-        PG_OAUTH_HEADER_SHA256,
-        "be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bcf"
-    );
+fn rust_layout_matches_the_current_postgresql_18_oauth_header() {
+    assert_eq!(PG18_VERSION_NUM / 10_000, 18);
     assert_eq!(PG_OAUTH_VALIDATOR_MAGIC, 0x2025_0220);
 
     assert_eq!(size_of::<ValidatorModuleState>(), 16);
@@ -38,6 +34,27 @@ fn rust_layout_matches_postgresql_18_4_oauth_header() {
 fn exported_init_uses_the_generated_postgresql_signature() {
     let init: OAuthValidatorModuleInit = Some(pggomtm::_PG_oauth_validator_module_init);
     assert!(init.is_some());
+}
+
+#[test]
+fn generated_callback_types_match_the_official_surface() {
+    unsafe extern "C-unwind" fn startup(_state: *mut ValidatorModuleState) {}
+    unsafe extern "C-unwind" fn shutdown(_state: *mut ValidatorModuleState) {}
+    unsafe extern "C-unwind" fn validate(
+        _state: *const ValidatorModuleState,
+        _token: *const c_char,
+        _role: *const c_char,
+        _result: *mut ValidatorModuleResult,
+    ) -> bool {
+        false
+    }
+
+    let startup: ValidatorStartupCB = Some(startup);
+    let shutdown: ValidatorShutdownCB = Some(shutdown);
+    let validate: ValidatorValidateCB = Some(validate);
+    assert!(startup.is_some());
+    assert!(shutdown.is_some());
+    assert!(validate.is_some());
 }
 
 #[test]
@@ -70,7 +87,7 @@ fn callback_table_initializes_and_fails_closed_before_jwt_gate() {
 
 #[test]
 fn pg18_stable_line_versions_are_supported() {
-    for server_version in [180_003, 180_004, 180_005, 189_999] {
+    for server_version in [180_000, 180_001, 180_999, 189_999] {
         assert!(
             server_version_is_supported(server_version),
             "PG18 version {server_version} must pass the runtime major gate"

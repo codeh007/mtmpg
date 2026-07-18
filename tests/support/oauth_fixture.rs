@@ -159,10 +159,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             reject_extra_arguments(arguments)?;
             verify_system_user(slug, &path)?;
         }
-        "verify-codec-rejections" => {
-            reject_extra_arguments(arguments)?;
-            verify_codec_rejections()?;
-        }
         _ => return Err(invalid_input("unknown fixture command").into()),
     }
 
@@ -220,7 +216,7 @@ fn generate_fixtures(output_dir: &Path) -> Result<(), Box<dyn Error>> {
     *signature_byte = if *signature_byte == b'A' { b'B' } else { b'A' };
     write_ephemeral_fixture(&output_dir.join("tampered.jwt"), &tampered)?;
 
-    println!("已生成仅供本次PG18.4 OAuth矩阵使用的临时合成fixture");
+    println!("已生成仅供本次PG18 OAuth矩阵使用的临时合成fixture");
     Ok(())
 }
 
@@ -251,28 +247,7 @@ fn verify_system_user(slug: &str, path: &Path) -> Result<(), Box<dyn Error>> {
         return Err(IoError::new(ErrorKind::InvalidData, "non-canonical system_user").into());
     }
 
-    println!("PG18.4 system_user identity round-trip passed for {slug}");
-    Ok(())
-}
-
-fn verify_codec_rejections() -> Result<(), Box<dyn Error>> {
-    let valid = IDENTITY_SCENARIOS[0].identity().encode_authn_id()?;
-    let unknown_version = format!("oauth:{}", valid.replacen("pggomtm:v1", "pggomtm:v2", 1));
-    let oversize = format!("oauth:{}", "x".repeat(MAX_AUTHN_ID_BYTES + 1));
-    let illegal =
-        "oauth:pggomtm:v1;u=bad:delimiter;actor=client:cli_ok;d=dlg_ok;m=oauth;a=1;p=ordinary";
-
-    for rejected in [unknown_version.as_str(), oversize.as_str(), illegal] {
-        if decode_system_user(rejected).is_ok() {
-            return Err(IoError::new(
-                ErrorKind::InvalidData,
-                "invalid system_user decoded successfully",
-            )
-            .into());
-        }
-    }
-
-    println!("PG18.4 system_user codec rejection matrix passed");
+    println!("PG18 system_user identity round-trip passed for {slug}");
     Ok(())
 }
 

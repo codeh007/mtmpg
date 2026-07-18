@@ -1,92 +1,50 @@
 # pggomtm 仓库级 Agent 规则
 
-本文件约束在本仓库工作的自动化开发 Agent。Agent 必须先理解 OpenSpec、PostgreSQL OAuth 应用程序二进制接口（ABI）与当前 fail-closed 原型边界，再修改源码、测试、构建或文档。
+本文件适用于整个仓库。所有分析、计划、文档和交付回复使用中文；代码、命令、标识符、上游专有名称及完整 MIT 法律文本保留原文。
 
-## 适用范围与权威
+## 权威与边界
 
-本文件适用于整个仓库。仓库保持单一 Rust crate、单一实现和单一构建权威：
+- `src/` 是唯一 production 实现；消费仓库不得保留源码副本或第二条构建链。
+- `Cargo.toml` 声明兼容依赖范围，`rust-toolchain.toml` 使用 stable；release用 `Cargo.lock` 只由远端CI解析并保存为发布证据。
+- `tests/` 承载Rust领域测试、官方C layout probe、真实PG18和final-image行为测试及最小fixture。
+- `Dockerfile` 只构建production module并组装PG18 runtime image。
+- `.github/workflows/` 是依赖解析、重计算、candidate和promotion入口。
+- `openspec/` 是需求、设计和task状态权威；Git、Actions、Release和attestation保存历史证据。
 
-- `Cargo.toml`、`Cargo.lock` 与 `rust-toolchain.toml` 定义 crate、依赖和工具链。
-- `src/lib.rs` 承载 PostgreSQL module 入口、OAuth callback 与原生边界。
-- `src/database_auth.rs` 承载离线 JSON Web Token（JWT）、JSON Web Key Set（JWKS）、role 与 identity 领域逻辑。
-- `tests/` 承载 Rust 测试、官方 C layout probe 与真实 runtime probe。
-- `Dockerfile` 只构建 production module并组装固定 PostgreSQL 18.4 runtime image。
-- `openspec/` 记录需求、设计、delta spec 与 task 状态。
-- `docs/evidence/` 只保存可复验且不含 secret 的历史证据。
+不要引入Cargo workspace、嵌套crate、生产HTTP服务、第二Dockerfile或本地image fallback。
 
-不要引入 Cargo workspace、嵌套 crate、消费仓库源码副本或第二套 Docker 构建定义。
+## 修改前
 
-## 修改前读取契约
+1. 使用`gh`读取关联Issue，并读取active OpenSpec proposal、design、spec和tasks。
+2. 阅读`Cargo.toml`、`rust-toolchain.toml`、`Dockerfile`及相关源码和测试。
+3. 修改OAuth边界时追踪`_PG_oauth_validator_module_init`、startup、validate和shutdown调用链。
+4. 区分当前行为与计划目标，只有实现和远端验证完成后才能勾选task。
 
-Agent 必须按当前任务范围核对现有契约：
+## PostgreSQL与认证
 
-1. 读取关联 GitHub Issue 和 active OpenSpec proposal、design、spec 与 tasks。
-2. 读取 `Cargo.toml`、`Cargo.lock`、`rust-toolchain.toml` 和 `Dockerfile`。
-3. 追踪 `_PG_oauth_validator_module_init`、startup、validate 与 shutdown 调用边界。
-4. 阅读相关 Rust、C、SQL 测试和既有 evidence。
-5. 明确当前行为与未来目标，不能把未完成的 OpenSpec task 写成现有能力。
+- OAuth ABI权威是本次目标`pg_config --includedir-server/libpq/oauth.h`；bindings必须由allowlist生成并由官方C compiler验证layout，不得手写第二套声明。
+- `pgrx`负责module magic、guard、PostgreSQL error和allocator语义，不得用自制兼容层绕过。
+- Module由`oauth_validator_libraries`加载，不得增加control、versioned SQL、`CREATE EXTENSION`或`cargo pgrx install/package`交付路径。
+- 认证必须fail closed。不得增加备用issuer、旧verifier、network fetch、SQL/SPI、宽松claims或其他fallback。
+- Runtime只读取固定只读config/public JWKS；不得读取private key、API key、连接串或生产数据。
 
-当前无 gate 最终制品已从外部只读config/public JWKS建立snapshot并执行正式离线验签；database token、closed role、allocator/identity、失败脱敏、production artifact与final image readiness均已取得远端证据。后续工作集中在main candidate、release manifest、公开 GitHub Container Registry（GHCR）、软件物料清单（SBOM）/attestation和gomtmui consumer evidence，不得无目标重写validator主路径。仓库不是 production-ready，也没有稳定发布版或已发布开放容器计划（OCI）摘要。
+## Latest-compatible输入
 
-## 保持完整 pgrx 与官方 OAuth 边界
+- Rust跟随stable；PostgreSQL跟随PG18 major内最新稳定minor；Cargo使用兼容版本范围；Actions使用官方稳定major tag。
+- 源码不得固定上游patch、base digest、Cargo精确`=`版本、Action commit SHA或手工下载archive hash。
+- CI每次只解析一次Cargo.lock和上游image digest，全部测试、build和publish必须复用该结果。
+- PostgreSQL major、Cargo不兼容major和产品SemVer升级仍需显式源码变更。
 
-完整 `pgrx` 是 PostgreSQL 集成边界。Agent 必须保留 `pgrx` 提供的 module magic、guard、PostgreSQL error 与 allocator 语义，不能用自行实现的替代层绕开这些边界。
+## 验证与本地限制
 
-PostgreSQL OAuth ABI 的目标权威是目标 `pg_config --includedir-server` 下的 `libpq/oauth.h`。当前 pgrx 0.19.1 的 PostgreSQL 18 bindgen 输入没有完整覆盖该 header，因此不得把缺失的 pgrx 生成类型误当成 OAuth ABI 权威。
+- 本地只允许源码/规划编辑、Git/OpenSpec操作、只读调查和精确清理已知对象。
+- 本地不得运行Cargo、原生编译、Docker build/run、临时PostgreSQL或final-image检查。
+- 实现提交到`main`后只使用精确SHA的GitHub Actions结果完成任务；失败历史保留并向前修复。
+- 测试验证领域和真实系统行为，不测试Dockerfile/workflow字面量、精确版本/hash、layer/config相等或配置文件不存在。
+- 不通过删除必要行为测试、弱化断言、降低lint或扩大权限获得通过。
 
-涉及 OAuth struct、magic、callback 或 layout 时，Agent 必须以精确官方 header、C probe 和受控生成结果交叉验证。不要新增第二套手写声明；生成文件只能通过仓库提供的生成命令更新，不得手写。
+## 数据与Git
 
-该模块由 `oauth_validator_libraries` 加载，不是 SQL extension。不要新增 control 文件、versioned extension SQL、`CREATE EXTENSION` 流程，也不要把 `cargo pgrx install/package` 作为生产交付方式。
+源码、测试、日志、image和发布材料不得包含真实token、private key、JWKS、连接串、`.env`、session、PGDATA或未脱敏身份。测试只使用确定性合成fixture并限定在测试feature。
 
-## 保护认证与生产数据
-
-源码、测试、Git history、日志、image 和 evidence 都不得包含以下数据：
-
-- signing private key、API key、OAuth token、database JWT 或 authorization code
-- 数据库连接串、`.env`、credential、session、PostgreSQL data 或真实 JWKS working copy
-- 生产配置、用户身份数据或未脱敏请求日志
-
-测试只能使用确定性合成 fixture，并通过 feature 把 fixture 限定在测试 gate。除非任务明确授权，否则对生产数据库、配置和部署只允许只读检查；任何输出都必须脱敏。
-
-认证失败必须 fail closed。不要增加备用 issuer、旧 verifier、网络 fetch、SQL/SPI 查询、宽松 claims 解析或其他 fallback。
-
-## 测试与 GitHub Actions 门禁
-
-行为修复和功能变更先增加能证明缺口的失败测试，再实现最小根因修复。纯文档变更不适用测试驱动开发（TDD），应运行文档聚焦检查。
-
-Agent 必须按改动风险准备门禁，并以远端GitHub Actions结果作为完成证据：
-
-- 本地只允许源码与规划编辑、Git/OpenSpec操作、只读调查、帮助或纯fixture policy命令，以及对已知诊断对象的精确清理。
-- 本地不得运行Docker build/run、Cargo或原生编译、临时PostgreSQL cluster和最终image检查；仓库重计算入口必须在`GITHUB_ACTIONS!=true`时先拒绝。
-- 维护者或Agent可把精确、可审查的commit直接非force推送到`main`；`.github/workflows/native-ci.yml`在GitHub-hosted runner直接编排Rust、ABI、PostgreSQL integration、production artifact与image门禁。
-- 原生ABI、pgrx、PostgreSQL minor、artifact或门禁变化必须取得对应远端commit的成功`Native CI` run；不得用本地image、tag或终端日志替代。
-- 使用`gh run view`、`gh run watch`和`gh run rerun`读取或复验远端结果；不要通过删除门禁、扩大权限或引入第二workflow实现来获得通过。
-
-测试失败时先定位根因。不要删除测试、弱化断言、降低 lint、关闭 warning 或扩大兼容分支来获得通过结果。
-
-## 文档与 OpenSpec
-
-所有正文、分析、计划和仓库文档使用中文。完整且未改写的标准 MIT 英文法律文本是唯一例外；代码、命令、标识符和上游专有名称保留原文。
-
-文档必须区分已验证事实与未来目标。三项以上内容使用列表，步骤使用有序列表，代码围栏标注语言，相对链接必须存在。
-
-OpenSpec 是需求范围的权威来源：
-
-- 行为变化先更新或确认对应 proposal、design 与 delta spec。
-- 实现和验证完成后才能更新 task checkbox。
-- 不手写生成文件，不增加备用实现，不用包装函数掩盖根因。
-- 每次提交只包含当前 task 要求的源码、测试、文档与 evidence。
-
-## GitHub Issue 与交付
-
-任务来自 GitHub Issue 时，Agent 先使用 `gh` 阅读 Issue。mtmpg 自有 Issue 是本仓库目标、范围、非目标和验收标准的协作权威；OpenSpec 是行为与 task 状态权威。跨仓库总线 Issue 必须反向链接实际修改仓库的跟踪 Issue。当前公开主线、candidate 与首个 stable release 由[mtmpg #1](https://github.com/codeh007/mtmpg/issues/1)跟踪。
-
-公开的 `main` 是 development branch和唯一CI/CD源码来源，不是 stable 标记。维护者与Agent可直接非force推进；CI失败commit保留在历史中并由后续commit修复，失败SHA不得发布candidate或更新stable引用。
-
-Pull Request（PR）是外部贡献或可选协作入口，不是更新`main`的前置条件。公开fork PR只能使用GitHub-hosted临时runner、read-only token和无secret上下文，禁止`pull_request_target`、package/Release/attestation写权限。
-
-pgrx、JOSE、Rust toolchain、PostgreSQL minor、官方base/header、Actions source/pin、release workflow或写权限变化仍需显式技术审查。后续`mtmpg-postgres` package公开读取，写入只属于仓库自身成功`main` push的trusted job；消费者必须固定完整OCI digest，不得保存private pull credential。
-
-实施期间保留可复验的 commit、命令、结果和限制，等该 Issue 涉及的仓库工作全部结束后再统一回填结果。阶段性跨仓评论只能建立依赖或反向链接，不能冒充完成声明。
-
-Agent 不得执行 `force push`、覆盖他人改动、修改无关文件或把 ignored 构建产物加入 Git。交付前检查 tracked diff，确认没有 secret、运行数据、重复源码或超出 OpenSpec 的声明。
+不得force push、覆盖他人改动、提交ignored产物或修改任务外文件。任务来自Issue时，在该Issue涉及的工作完全结束后回填结果；`extract-and-standardize-pggomtm`须在任务7.7后先回填阶段性结果。

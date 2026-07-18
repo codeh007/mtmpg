@@ -2,16 +2,15 @@
 name = "pggomtm"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97.1"
 license = "MIT"
 publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[[example]]
+[[bin]]
 name = "pggomtm_oauth_smoke_fixture"
-path = "examples/pggomtm_oauth_smoke_fixture.rs"
+path = "tests/support/oauth_fixture.rs"
 required-features = ["pgx-oauth-gate"]
 
 [features]
@@ -22,17 +21,16 @@ abi-runtime-gate = []
 pgx-oauth-gate = []
 
 [dependencies]
-jaws = { version = "=1.0.4", default-features = false, features = ["p256"] }
-p256 = { version = "=0.13.2", features = ["ecdsa", "jwk"] }
-pgrx = { version = "=0.19.1", default-features = false }
-serde = { version = "=1.0.228", features = ["derive"] }
-serde_json = "=1.0.150"
-url = "=2.5.8"
+jaws = { version = "1", default-features = false, features = ["p256"] }
+p256 = { version = "0.13", features = ["ecdsa", "jwk"] }
+pgrx = { version = "0.19", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
 
 [dev-dependencies]
-base64ct = "=1.8.0"
-sha2 = "=0.10.9"
+base64ct = "1"
+sha2 = "0.10"
 
 [build-dependencies]
-bindgen = { version = "=0.72.1", default-features = false, features = ["runtime"] }
-sha2 = "=0.10.9"
+bindgen = { version = "0.72", default-features = false, features = ["runtime"] }

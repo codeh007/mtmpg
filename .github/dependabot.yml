@@ -1,7 +1,7 @@
 version: 2
 
 # Dependabot 仅创建更新 PR；所有依赖变更仍须由维护者人工审查，禁止自动合并。
-# 不配置 Docker、Rust toolchain 或 PostgreSQL updater，避免绕过固定输入与运行时验证。
+# Docker、Rust toolchain 与 PostgreSQL 由 Native CI 解析最新兼容稳定输入。
 updates:
   - package-ecosystem: "cargo"
     directory: "/"

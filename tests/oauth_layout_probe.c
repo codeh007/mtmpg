@@ -7,8 +7,8 @@
 #define TYPE_MATCHES(expression, type) \
 	_Generic((expression), type: 1, default: 0)
 
-_Static_assert(PG_VERSION_NUM == 180004,
-               "pggomtm layout probe requires PostgreSQL 18.4 headers");
+_Static_assert(PG_VERSION_NUM / 10000 == 18,
+               "pggomtm layout probe requires PostgreSQL 18 headers");
 _Static_assert(PG_OAUTH_VALIDATOR_MAGIC == 0x20250220,
                "unexpected PostgreSQL OAuth validator magic");
 

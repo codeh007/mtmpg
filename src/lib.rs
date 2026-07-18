@@ -28,19 +28,12 @@ pub mod oauth_abi;
 pub mod runtime_config;
 
 pub use oauth_abi::{
-    OAuthValidatorCallbacks, OAuthValidatorModuleInit, PG_OAUTH_BINDINGS_SHA256,
-    PG_OAUTH_HEADER_SHA256, PG_OAUTH_VALIDATOR_MAGIC, ValidatorModuleResult, ValidatorModuleState,
-    ValidatorShutdownCB, ValidatorStartupCB, ValidatorValidateCB,
+    OAuthValidatorCallbacks, OAuthValidatorModuleInit, PG_OAUTH_VALIDATOR_MAGIC,
+    ValidatorModuleResult, ValidatorModuleState, ValidatorShutdownCB, ValidatorStartupCB,
+    ValidatorValidateCB,
 };
 
-pub const PG18_VERSION_NUM: i32 = 180_004;
-pub const PGGOMTM_BUILD_IDENTITY_JSON: &str = env!("PGGOMTM_BUILD_IDENTITY_JSON");
-pub const PGGOMTM_BUILD_IDENTITY_SHA256: &str = env!("PGGOMTM_BUILD_IDENTITY_SHA256");
-
-#[used]
-static EMBEDDED_BUILD_IDENTITY_JSON: &str = PGGOMTM_BUILD_IDENTITY_JSON;
-#[used]
-static EMBEDDED_BUILD_IDENTITY_SHA256: &str = PGGOMTM_BUILD_IDENTITY_SHA256;
+pub const PG18_VERSION_NUM: i32 = 180_000;
 
 #[cfg(feature = "abi-runtime-gate")]
 const ABI_RUNTIME_PANIC_SENTINEL: usize = 1;
