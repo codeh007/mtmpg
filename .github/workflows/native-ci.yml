@@ -58,6 +58,7 @@ jobs:
             gnupg \
             jq \
             libclang-dev \
+            libkrb5-dev \
             libssl-dev \
             pkg-config \
             shellcheck \

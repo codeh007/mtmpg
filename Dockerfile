@@ -15,6 +15,7 @@ RUN apt-get update \
       curl \
       gnupg \
       libclang-dev \
+      libkrb5-dev \
       libssl-dev \
       pkg-config \
     && curl --fail --location --proto '=https' --tlsv1.2 \
