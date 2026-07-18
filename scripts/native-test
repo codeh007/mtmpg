@@ -6,7 +6,7 @@ export LC_ALL=C
 
 REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPOSITORY_ROOT
-readonly OAUTH_HEADER_SHA256="be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bcf"
+readonly PG_HEADER_DIGEST="be015ae68deef28a906c8739bc653ca90a4c6966c10f0efd3bd926efb4958bcf"
 readonly POSTGRESQL_SOURCE_SHA256="81a81ec695fb0c7901407defaa1d2f7973617154cf27ba74e3a7ab8e64436094"
 readonly CARGO_DENY_ARCHIVE_SHA256="9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
 readonly SHELLCHECK_ARCHIVE_SHA256="8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
@@ -62,7 +62,7 @@ verify_prepared_toolchain() {
 
   local include_dir
   include_dir="$("${PGRX_PG_CONFIG_PATH}" --includedir-server)"
-  printf '%s  %s\n' "${OAUTH_HEADER_SHA256}" "${include_dir}/libpq/oauth.h" \
+  printf '%s  %s\n' "${PG_HEADER_DIGEST}" "${include_dir}/libpq/oauth.h" \
     | sha256sum --check --strict >/dev/null || \
     fail "PostgreSQL OAuth header does not match the approved source"
 }
@@ -243,7 +243,7 @@ run_abi() {
     tests/oauth_layout_probe.c \
     -o "${layout_probe}"
   "${layout_probe}"
-  printf '%s  %s\n' "${OAUTH_HEADER_SHA256}" "${include_dir}/libpq/oauth.h" \
+  printf '%s  %s\n' "${PG_HEADER_DIGEST}" "${include_dir}/libpq/oauth.h" \
     | sha256sum --check --strict >/dev/null
 
   cargo test --locked --no-default-features \
