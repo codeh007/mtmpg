@@ -41,7 +41,7 @@ jobs:
           test -z "$(git status --porcelain)"
 
       - name: Scan source and history for secrets
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
