@@ -67,5 +67,6 @@ jobs:
           provenance: false
           sbom: false
           tags: mtmpg-native-ci:${{ github.sha }}
+          no-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/issue-116-extract-pggomtm' }}
           cache-from: type=gha,scope=mtmpg-native-ci
           cache-to: type=gha,mode=max,scope=mtmpg-native-ci
