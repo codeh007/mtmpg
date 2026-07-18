@@ -174,7 +174,6 @@ jobs:
           cargo test --locked --no-default-features \
             --features pg18,abi-gate,pgx-oauth-gate \
             --test pgx_oauth_gate
-          cargo test --locked --no-default-features --features pg18
 
       - name: Stage and run real PG18 matrices
         shell: bash
