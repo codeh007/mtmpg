@@ -119,8 +119,9 @@ usage() {
 
 require_artifact() {
   local path="$1"
-  test -f "${ARTIFACT_ROOT}/${path}" && test ! -L "${ARTIFACT_ROOT}/${path}" || \
+  if test ! -f "${ARTIFACT_ROOT}/${path}" || test -L "${ARTIFACT_ROOT}/${path}"; then
     fail "required integration artifact is unavailable: ${path}"
+  fi
 }
 
 verify_runtime() {

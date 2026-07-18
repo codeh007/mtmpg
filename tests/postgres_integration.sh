@@ -47,8 +47,9 @@ validate_artifacts() {
     runtime_config_validate_probe.sql \
     runtime-config-fixture/validator.json \
     runtime-config-fixture/jwks.json; do
-    test -f "${artifact_root}/${artifact}" && test ! -L "${artifact_root}/${artifact}" || \
+    if test ! -f "${artifact_root}/${artifact}" || test -L "${artifact_root}/${artifact}"; then
       fail "required integration artifact is unavailable: ${artifact}"
+    fi
   done
 }
 
