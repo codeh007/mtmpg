@@ -26,6 +26,15 @@ assert_contains() {
     fail "${file_path#"${REPOSITORY_ROOT}/"} does not contain required gate wiring"
 }
 
+assert_absent() {
+  local file_path="$1"
+  local forbidden="$2"
+
+  if grep --ignore-case --quiet --fixed-strings -- "${forbidden}" "${file_path}"; then
+    fail "${file_path#"${REPOSITORY_ROOT}/"} contains forbidden workflow authority: ${forbidden}"
+  fi
+}
+
 assert_redacted() {
   local output_path="$1"
 
@@ -170,36 +179,55 @@ env -u PGGOMTM_GITLEAKS_BIN \
   "${GATE}" scan-path "${ALLOWED_ROOT}" \
   >"${TEMP_ROOT}/path-resolved-gitleaks.out"
 
-assert_contains "${REPOSITORY_ROOT}/.dockerignore" "!gitleaks.toml"
-assert_contains "${REPOSITORY_ROOT}/.dockerignore" "!.dockerignore"
-assert_contains "${REPOSITORY_ROOT}/.dockerignore" "!.github/workflows/native-ci.yml"
-assert_contains "${REPOSITORY_ROOT}/.dockerignore" "!scripts/"
-assert_contains "${REPOSITORY_ROOT}/.dockerignore" "!scripts/**"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" "COPY .dockerignore ./"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
-  "COPY .github/workflows/native-ci.yml ./.github/workflows/native-ci.yml"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" "COPY gitleaks.toml ./"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" "COPY scripts ./scripts"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
-  "scripts/public-readiness install-gitleaks /usr/local/bin"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
-  "shellcheck-v0.11.0.linux.x86_64.tar.xz"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
-  "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" "RUN shellcheck"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
-  "tests/public_readiness_gate.sh /usr/local/bin/gitleaks"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
-  "scripts/public-readiness scan-path /src"
-
 readonly NATIVE_WORKFLOW="${REPOSITORY_ROOT}/.github/workflows/native-ci.yml"
+assert_contains "${NATIVE_WORKFLOW}" "contents: read"
 assert_contains "${NATIVE_WORKFLOW}" "fetch-depth: 0"
 assert_contains "${NATIVE_WORKFLOW}" \
   "scripts/public-readiness install-gitleaks \"\$RUNNER_TEMP/public-readiness-bin\""
 assert_contains "${NATIVE_WORKFLOW}" \
   "scripts/public-readiness scan-source \"\$GITHUB_WORKSPACE\""
+for entrypoint_fixture in \
+  tests/native_container_entrypoint.sh \
+  tests/native_test_entrypoint.sh \
+  tests/postgres_integration_entrypoint.sh \
+  tests/image_readiness_entrypoint.sh; do
+  assert_contains "${NATIVE_WORKFLOW}" "run: ${entrypoint_fixture}"
+done
 assert_contains "${NATIVE_WORKFLOW}" \
-  "no-cache: \${{ github.event_name == 'push' && github.ref == 'refs/heads/issue-116-extract-pggomtm' }}"
+  "scripts/native-container create"
+assert_contains "${NATIVE_WORKFLOW}" \
+  "scripts/native-container prepare"
+for native_command in \
+  policy \
+  dependencies \
+  abi \
+  cargo-tests \
+  quality \
+  production-artifact \
+  stage-integration; do
+  assert_contains "${NATIVE_WORKFLOW}" \
+    "scripts/native-container exec ${native_command}"
+done
+assert_contains "${NATIVE_WORKFLOW}" \
+  "tests/postgres_integration.sh run target/native-integration"
+assert_contains "${NATIVE_WORKFLOW}" \
+  "scripts/native-container destroy"
+assert_contains "${NATIVE_WORKFLOW}" \
+  "SOURCE_REVISION=\${{ github.sha }}"
+assert_contains "${NATIVE_WORKFLOW}" \
+  "scripts/image-readiness verify \"mtmpg-native-ci:\${GITHUB_SHA}\" \"\$GITHUB_SHA\""
+for forbidden_workflow in \
+  'issue-116-extract-pggomtm' \
+  'pull_request_target' \
+  'schedule:' \
+  'no-cache:' \
+  'inputs.cold' \
+  'packages: write' \
+  'contents: write' \
+  'id-token: write' \
+  'attestations: write'; do
+  assert_absent "${NATIVE_WORKFLOW}" "${forbidden_workflow}"
+done
 
 readonly CLEAN_BUNDLE_ROOT="${TEMP_ROOT}/clean-bundle"
 initialize_surface_bundle "${CLEAN_BUNDLE_ROOT}" "absent" 0

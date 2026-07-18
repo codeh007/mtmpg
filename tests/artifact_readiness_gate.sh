@@ -7,6 +7,7 @@ REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPOSITORY_ROOT
 readonly GATE="${REPOSITORY_ROOT}/scripts/artifact-readiness"
 readonly LICENSE_FILE="${REPOSITORY_ROOT}/LICENSE"
+readonly SOURCE_REVISION="1111111111111111111111111111111111111111"
 
 TEMP_ROOT="$(mktemp --directory)"
 readonly TEMP_ROOT
@@ -15,14 +16,6 @@ trap 'rm -rf "${TEMP_ROOT}"' EXIT
 fail() {
   printf 'artifact-readiness gate test failed: %s\n' "$1" >&2
   exit 1
-}
-
-assert_contains() {
-  local file_path="$1"
-  local expected="$2"
-
-  grep --quiet --fixed-strings -- "${expected}" "${file_path}" || \
-    fail "${file_path#"${REPOSITORY_ROOT}/"} does not contain required artifact gate wiring"
 }
 
 expect_failure() {
@@ -92,15 +85,21 @@ chmod 0644 "${MODULE_FILE}"
   "${IDENTITY_ROOT}" \
   "${MODULE_FILE}" \
   "${LICENSE_FILE}" \
-  "${MANIFEST_FILE}"
+  "${MANIFEST_FILE}" \
+  "${SOURCE_REVISION}"
 "${GATE}" verify-build-manifest \
   "${MANIFEST_FILE}" \
   "${MODULE_FILE}" \
   "${LICENSE_FILE}" \
-  "${IDENTITY_ROOT}"
+  "${IDENTITY_ROOT}" \
+  "${SOURCE_REVISION}"
 
 jq --exit-status '
-  .schema == "pggomtm-build-manifest/v1"
+  .schema == "pggomtm-build-manifest/v2"
+  and .source == {
+    "repository":"https://github.com/codeh007/mtmpg",
+    "revision":"1111111111111111111111111111111111111111"
+  }
   and .module.name == "pggomtm"
   and .module.version == "0.1.0"
   and .module.features == ["pg18"]
@@ -121,7 +120,8 @@ expect_failure \
   "${IDENTITY_ROOT}" \
   "${MODULE_FILE}" \
   "${LICENSE_FILE}" \
-  "${TEMP_ROOT}/duplicate-manifest.json"
+  "${TEMP_ROOT}/duplicate-manifest.json" \
+  "${SOURCE_REVISION}"
 rm -rf "${IDENTITY_ROOT}/release/build/pggomtm-duplicate"
 
 jq '.image_digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' \
@@ -132,7 +132,8 @@ expect_failure \
   "${TEMP_ROOT}/self-referential-manifest.json" \
   "${MODULE_FILE}" \
   "${LICENSE_FILE}" \
-  "${IDENTITY_ROOT}"
+  "${IDENTITY_ROOT}" \
+  "${SOURCE_REVISION}"
 
 jq '.module.sha256 = "<digest>"' \
   "${MANIFEST_FILE}" >"${TEMP_ROOT}/placeholder-manifest.json"
@@ -142,7 +143,8 @@ expect_failure \
   "${TEMP_ROOT}/placeholder-manifest.json" \
   "${MODULE_FILE}" \
   "${LICENSE_FILE}" \
-  "${IDENTITY_ROOT}"
+  "${IDENTITY_ROOT}" \
+  "${SOURCE_REVISION}"
 
 jq --arg changed "${FIXTURE_BINDINGS_SHA256}" \
   '.postgresql.oauth_header_sha256 = $changed' \
@@ -153,7 +155,8 @@ expect_failure \
   "${TEMP_ROOT}/identity-mismatch-manifest.json" \
   "${MODULE_FILE}" \
   "${LICENSE_FILE}" \
-  "${IDENTITY_ROOT}"
+  "${IDENTITY_ROOT}" \
+  "${SOURCE_REVISION}"
 
 cp "${MODULE_FILE}" "${TEMP_ROOT}/changed-pggomtm.so"
 printf 'changed\n' >>"${TEMP_ROOT}/changed-pggomtm.so"
@@ -163,7 +166,17 @@ expect_failure \
   "${MANIFEST_FILE}" \
   "${TEMP_ROOT}/changed-pggomtm.so" \
   "${LICENSE_FILE}" \
-  "${IDENTITY_ROOT}"
+  "${IDENTITY_ROOT}" \
+  "${SOURCE_REVISION}"
+
+expect_failure \
+  "build manifest source was not bound to the expected commit" \
+  "${GATE}" verify-build-manifest \
+  "${MANIFEST_FILE}" \
+  "${MODULE_FILE}" \
+  "${LICENSE_FILE}" \
+  "${IDENTITY_ROOT}" \
+  "2222222222222222222222222222222222222222"
 
 readonly SNAPSHOT_ROOT="${TEMP_ROOT}/snapshot-root"
 install -d "${SNAPSHOT_ROOT}/etc"
@@ -226,34 +239,5 @@ expect_failure \
 expect_failure \
   "a non-ELF artifact passed the ELF policy" \
   "${GATE}" verify-elf "${MODULE_FILE}"
-
-"${GATE}" verify-dockerfile "${REPOSITORY_ROOT}/Dockerfile"
-awk '
-  { print }
-  $0 == "FROM candidate-content" {
-    print "COPY LICENSE /tmp/unapproved-final-file"
-  }
-' "${REPOSITORY_ROOT}/Dockerfile" >"${TEMP_ROOT}/modified-final-stage.Dockerfile"
-expect_failure \
-  "an unapproved final-stage filesystem mutation was accepted" \
-  "${GATE}" verify-dockerfile \
-  "${TEMP_ROOT}/modified-final-stage.Dockerfile"
-assert_contains "${REPOSITORY_ROOT}/.dockerignore" "!LICENSE"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
-  "tests/artifact_readiness_gate.sh"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
-  "scripts/artifact-readiness create-build-manifest"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
-  "scripts/artifact-readiness verify-elf"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
-  "RUN install --directory --mode=0755 --owner=0 --group=0"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
-  "AS runtime-base-inventory"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
-  "AS candidate-content"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
-  "AS candidate-runtime-gate"
-assert_contains "${REPOSITORY_ROOT}/Dockerfile" \
-  "AS candidate-artifact-gate"
 
 printf 'artifact-readiness gate fixture policy passed\n'

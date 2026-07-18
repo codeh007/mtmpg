@@ -8,7 +8,7 @@
 
 - `Cargo.toml` 中的 `0.1.0` 只是当前 crate 元数据，不代表已经发布 `v0.1.0`。
 - 仓库尚未创建 stable tag、GitHub Release 或可供部署固定的 GHCR 开放容器计划（Open Container Initiative，OCI）摘要。
-- 仓库已经 public；默认 `main` 仍是一次性 bootstrap 前的初始基线，完整开发基线必须通过追溯审计与 cold build 后再非 force fast-forward。
+- 仓库已经public，完整开发基线已进入`main`；main是持续演进的源码线，不保证每个SHA都可发布。
 - 正常构建在外部材料和claims全部合规时授权并返回PostgreSQL allocator分配的版本化`authn_id`，tampered或不合规token保持未授权。
 - 当前无gate startup已经从外部只读 config 和 JSON Web Key Set（JWKS）建立每backend verifier snapshot，验证同文件系统原子轮换与既有snapshot隔离，并由正式validate callback消费该snapshot。
 - Database token矩阵已经覆盖OAuth client与API-key credential actor、三种profile、authority version、ID/time边界、algorithm、audience/scope与tampered signature；closed role与forbidden-role门禁已经取得[远端CI证据](evidence/issue-116/native-ci-bootstrap.md)，allocator与decoded identity往返已取得[真实libpq证据](evidence/issue-116/production-identity-roundtrip.md)，稳定reason与日志脱敏也已取得[远端可观察性证据](evidence/issue-116/authentication-failure-observability.md)。
@@ -16,7 +16,7 @@
 - Final image 已通过 ELF export、arch/libc、module 位置、官方 entrypoint、base filesystem 差异与内部 build manifest 门禁；精确远端结果见[artifact readiness证据](evidence/issue-116/artifact-readiness-gate.md)。
 - Runtime只接受PostgreSQL 18 major；当前build/test identity仍精确固定18.4，尚未独立构建或验证18.5，因此不得把现有artifact部署到18.5。
 - PG18.4的loader、allocator、callback和真实libpq `OAUTHBEARER`正负向smoke已通过；复验范围与限制见[PG18.4 runtime/OAuth证据](evidence/issue-116/pg18.4-runtime-oauth-smoke.md)。
-- 每个Cargo feature组合已生成并嵌入`pggomtm-build-identity/v1`规范JSON及其SHA-256。正式 image 还包含 `pggomtm-build-manifest/v1`，绑定实际 `.so` 与 MIT LICENSE checksum，但不包含 source commit 或 image 自身 OCI digest。
+- 每个Cargo feature组合已生成并嵌入`pggomtm-build-identity/v1`规范JSON及其SHA-256。正式image包含`pggomtm-build-manifest/v2`，绑定精确source、实际`.so`与MIT LICENSE checksum，但不包含image自身OCI digest。
 - `release-manifest.json` 与 release workflow 尚未实现。
 
 未来候选和 stable 发布必须满足本文全部适用门禁。任何缺失、未知或不匹配的发布事实都按不兼容处理。
@@ -25,11 +25,11 @@
 
 ## 远端持续集成证据契约
 
-根 `Dockerfile` 是唯一 build graph authority，`.github/workflows/native-ci.yml` 是日常远端持续集成（CI）入口。只有关联精确远端 commit 的成功 GitHub Actions run 可以完成 OpenSpec task、gomtmui consumer gate 或发布门禁；本地 `cargo`、`docker build`、image tag 和终端日志只用于诊断。
+`.github/workflows/native-ci.yml`是重计算和证据权威，直接编排Rust、官方ABI、真实PostgreSQL integration、production artifact与最终image检查。根`Dockerfile`只构建production module并组装固定官方PostgreSQL 18.4 runtime image。只有关联精确远端commit的成功GitHub Actions run可以完成OpenSpec task、gomtmui consumer gate或发布门禁。
 
-一次性 bootstrap feature push 与普通拉取请求（Pull Request，PR）/`main` lane 使用 BuildKit/GitHub Actions cache、同 ref 并发取消、read-only token 且不登录 GHCR。完整基线进入 `main` 后，workflow 删除长期 feature trigger；无缓存 cold authority 和 trusted release lane 在后续任务中单独建立。缓存 run 不得冒充 cold 或发布证据。
+本地不得运行Cargo或原生编译、Docker build/run、临时PostgreSQL cluster和最终image检查。`main` push与可选Pull Request（PR）lane可使用内容寻址cache；PR始终只读。仓库不维护临时feature trigger、scheduled cold lane或独立无缓存发布仪式。
 
-首次feature push bootstrap及其日志最小化复验已经通过；精确run、SHA、权限、artifact数量和限制记录在[Native CI bootstrap证据](evidence/issue-116/native-ci-bootstrap.md)。
+历史bootstrap及其日志最小化复验记录在[Native CI bootstrap证据](evidence/issue-116/native-ci-bootstrap.md)。该证据只描述当时状态，不替代当前`main` SHA的远端门禁。
 
 ## 三种版本不得混用
 
@@ -83,7 +83,7 @@ Contract `1` 的 profile 与 PostgreSQL role 映射如下：
 
 ### Authn ID contract
 
-当前 identity codec 使用 `pggomtm:v1` 前缀。该前缀标识 `authn_id` 的字段、顺序、分隔、规范编码和解析规则，不代表 production verifier 已经完成。
+当前identity codec使用`pggomtm:v1`前缀。该前缀标识`authn_id`的字段、顺序、分隔、规范编码和解析规则；production verifier已经使用该版本化identity，未知前缀仍fail closed。
 
 任何编码或解析变化都必须使用新前缀，例如 `pggomtm:v2`。发布不得静默改变 `pggomtm:v1`，也不得把未知前缀解释为 `v1`。
 
@@ -123,11 +123,11 @@ Git tag、OCI tag 和 `latest` 都只能用于发现。部署必须使用完整 
 
 上述 64 位十六进制值是明显非真实的格式占位，不对应任何已发布 image。Release、manifest 和部署配置不得包含 registry 凭据。
 
-目标 package `ghcr.io/codeh007/mtmpg-postgres` 将公开读取。匿名 pull 不需要 private credential，也不授予写、删除、改标或 Release 权限；package 写权限只属于受保护 `main` 上的 trusted job。公开读取、candidate 可用与 stable 支持是三个不同状态。
+目标package`ghcr.io/codeh007/mtmpg-postgres`将公开读取。匿名pull不需要private credential，也不授予写、删除、改标或Release权限；package写权限只属于仓库自身成功`main` push的candidate job。公开读取、candidate可用与stable支持是三个不同状态。
 
 ## Release manifest 契约
 
-当前 build script 生成 `pggomtm-build-identity/v1`，正式 image 包含 `pggomtm-build-manifest/v1`。内部 manifest 记录 module version、唯一 production feature、Rust/pgrx/JOSE、PostgreSQL source/header/bindings/runtime base、target、OS、architecture、libc、实际 `.so` 与 MIT LICENSE checksum；它不得包含 image 自身 OCI digest。
+当前build script生成`pggomtm-build-identity/v1`，正式image包含`pggomtm-build-manifest/v2`。内部manifest记录source repository/revision、module version、唯一production feature、Rust/pgrx/JOSE、PostgreSQL source/header/bindings/runtime base、target、OS、architecture、libc、实际`.so`与MIT LICENSE checksum；它不得包含image自身OCI digest。
 
 Trusted candidate workflow 在 OCI digest 产生后生成外部 `release-manifest.json`，加入 remote source commit、contract、test minor、最终 `.so`/OCI digest、验证矩阵、软件物料清单（SBOM）与 attestation。Workflow 不得重建 image 或改写内部 manifest 来补写 digest。
 
@@ -150,13 +150,13 @@ gomtmui 在更新消费 digest 前必须验证全部 manifest 字段。它还必
 
 Alpha 或 RC 使用与其 prerelease module version 一致的 crate、manifest、Git tag 和 OCI version tag。准备 stable 时，维护者必须创建冻结最终 version 的新 commit，并产生新的构建与 OCI digest。
 
-Stable candidate 必须按以下顺序从受保护 `main` 的最终 version commit 晋级：
+Stable candidate必须按以下顺序从`main`的精确最终version commit晋级：
 
-1. 通过普通 PR 把冻结的 `MAJOR.MINOR.PATCH`、contract、manifest schema 与文档合并到受保护 `main`，让 crate、module 和 manifest version 精确一致。
-2. Trusted candidate workflow 只从该精确 `main` commit 构建一次，并只发布 `sha-<short_commit>` 发现 tag、完整 OCI digest、外部 manifest、SBOM 与 attestation。
+1. 把冻结的`MAJOR.MINOR.PATCH`、contract、manifest schema与文档作为范围单一commit直接非force推进到`main`，让crate、module和manifest version精确一致。
+2. Candidate workflow只从该精确`main` commit构建并push一次，并只发布`sha-<short_commit>`发现tag、完整OCI digest、外部manifest、SBOM与attestation。
 3. Candidate 阶段不得发布 stable Git tag、OCI stable version tag、stable GitHub Release 或 `latest`。
-4. mtmpg cold/native 门禁与 gomtmui 端到端（end-to-end，E2E）验收使用相同 source commit、manifest 和 OCI digest。
-5. 验收期间 `main` 可以继续接收普通 PR；candidate 只有在其 source commit 仍是 `main` 未改写祖先且全部证据仍一致时才能晋级。
+4. mtmpg native/security/supply-chain门禁与gomtmui端到端（end-to-end，E2E）验收使用相同source commit、manifest和OCI digest。
+5. 验收期间`main`可以继续接收后续commit；candidate只有在其source commit仍是`main`未改写祖先且全部证据仍一致时才能晋级。
 6. 全部门禁通过后，trusted promotion workflow 为同一已验收 OCI digest 增加 stable alias，创建指向 candidate source commit 的 Git tag 与 immutable GitHub Release。
 
 创建 stable tag 和 Release 不得触发重建。后续环境必须晋级同一 OCI digest，不能从 tag 重建等价制品。
@@ -169,7 +169,7 @@ Stable 表示完整发布门禁全部通过，不表示进入 `main`、公开 pu
 - 最终 artifact 不包含 `abi-gate`、`abi-runtime-gate`、`pgx-oauth-gate`、测试 key、token、probe 或认证 fallback。
 - 精确首发变体通过 native build、应用程序二进制接口（ABI）、loader、allocator、callback、ELF 与 final filesystem 门禁。
 - 真实 PostgreSQL 18 OAuth allow 与 deny、role 和 identity 正负向矩阵全部通过。
-- Dependency、license、动态链接与完整追溯式 secret/cold 扫描全部通过。
+- Dependency、license、动态链接、source secret与最终image扫描全部通过。
 - SBOM、binary 与 container provenance 和 attestation 全部生成并验证。
 - gomtmui 对相同 source commit 和 OCI digest 的 candidate E2E 全部通过。
 - Immutable manifest、bundle、checksum、OCI digest 和验证矩阵完全一致。

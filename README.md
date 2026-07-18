@@ -1,6 +1,6 @@
 # pggomtm
 
-`pggomtm` 是公开维护的 PostgreSQL 18 OAuth validator Rust/pgrx 模块。本仓库是源码、原生测试、Docker build graph 与后续发布物的唯一权威；公开的 `main` 表示开发主线，不表示 stable 或 production-ready。本页说明当前能力边界、已验证环境、构建门禁与候选诊断方式。
+`pggomtm` 是公开维护的 PostgreSQL 18 OAuth validator Rust/pgrx 模块。本仓库是源码、原生测试、production image 与后续发布物的唯一权威；公开的 `main` 是唯一持续集成与交付源码线，不表示 stable 或 production-ready。本页说明当前能力边界、已验证环境、远端构建门禁与发布契约。
 
 ## 当前状态与加载边界
 
@@ -17,7 +17,7 @@
 - 认证失败遵循[版本化reason-code与可见性契约](docs/authentication-failures.md)：服务端只记录稳定脱敏类别；普通token拒绝对客户端保持通用，startup失败最多暴露稳定code。
 - `abi-gate`、`abi-runtime-gate` 与 `pgx-oauth-gate` 只用于测试。内置的确定性 key、公开 JSON Web Key Set（JWKS）和 token fixture 不得用于生产。
 
-仓库已经 public，但当前状态不是 `production-ready`。默认 `main` 仍是一次性 bootstrap 前的初始基线；完整开发基线暂时位于 `issue-116-extract-pggomtm`，必须先完成追溯审计、无缓存 cold build 与 whole-branch review，再按 OpenSpec 非 force fast-forward 到 `main`。仓库没有 stable 发布版、生产支持版本或可供部署固定的 GitHub Container Registry（GHCR）开放容器计划（OCI）摘要。
+仓库已经 public，完整开发基线已经进入`main`，但当前状态不是`production-ready`。仓库尚无stable发布版、生产支持版本或可供部署固定的GitHub Container Registry（GHCR）开放容器计划（OCI）摘要；只有成功`main` SHA产生并通过gomtmui验收的candidate才可晋级。
 
 ## 已验证支持矩阵
 
@@ -36,48 +36,32 @@
 
 PG18.4的loader、allocator、callback及真实libpq `OAUTHBEARER`正负向smoke记录在[Issue #116 PG18.4验证证据](docs/evidence/issue-116/pg18.4-runtime-oauth-smoke.md)。该证据不得外推为PG18.5部署批准。
 
-每个 Cargo feature 组合都会生成规范的 `pggomtm-build-identity/v1` JSON及其 SHA-256，并把两者嵌入对应module。正式 image 还包含 `pggomtm-build-manifest/v1`，把唯一 production identity 绑定到实际 `.so` 与 MIT LICENSE checksum。内部 manifest 不包含 source commit 或 image 自身 OCI digest；后续 trusted workflow 必须在 digest 产生后生成独立 `release-manifest.json`。
+每个 Cargo feature 组合都会生成规范的 `pggomtm-build-identity/v1` JSON及其 SHA-256，并把两者嵌入对应module。正式 image 还包含 `pggomtm-build-manifest/v2`，把精确source、唯一production identity、实际`.so`与MIT LICENSE checksum绑定在一起。内部manifest不包含尚未产生的image自身OCI digest；candidate job必须在push产生digest后生成独立`release-manifest.json`。
 
-正式validator只允许读取[固定路径下的版本化runtime配置](docs/runtime-configuration.md)。当前已实现每个新backend的只读config/public JWKS加载、严格校验、同文件系统原子替换布局、独立snapshot持有与shutdown释放；后续backend读取新snapshot，既有backend不reload。正式validate callback已经接入snapshot并通过真实PG18.4 valid/tampered token smoke，以及OAuth client/API-key actor、三种profile、authority、ID、time、algorithm、audience/scope和signature矩阵。Closed profile-role与forbidden-role门禁、allocator/identity往返、稳定reason与日志脱敏及无gate artifact能力边界均已取得远端证据；完整索引见[`docs/evidence/issue-116/`](docs/evidence/issue-116/)。后续工作不重新实现 validator 主路径，而是完成公开治理、cold authority、发布供应链与 gomtmui consumer evidence。
+正式validator只允许读取[固定路径下的版本化runtime配置](docs/runtime-configuration.md)。当前已实现每个新backend的只读config/public JWKS加载、严格校验、同文件系统原子替换布局、独立snapshot持有与shutdown释放；后续backend读取新snapshot，既有backend不reload。正式validate callback已经接入snapshot并通过真实PG18.4 valid/tampered token smoke，以及OAuth client/API-key actor、三种profile、authority、ID、time、algorithm、audience/scope和signature矩阵。Closed profile-role与forbidden-role门禁、allocator/identity往返、稳定reason与日志脱敏及无gate artifact能力边界均已取得远端证据；完整索引见[`docs/evidence/issue-116/`](docs/evidence/issue-116/)。后续工作不重新实现validator主路径，而是完成candidate供应链、gomtmui consumer evidence与same-digest stable promotion。
 
 ## 通过 GitHub Actions 构建和测试
 
-根 `Dockerfile` 是 Rust、C、production 静态/ELF 离线能力、真实 PostgreSQL runtime 与最终制品隔离检查的唯一 build graph。`.github/workflows/native-ci.yml` 从精确远端 commit 执行该 graph；只有成功的 `Native CI` run 可以完成 OpenSpec task、gomtmui consumer gate 或发布门禁。本地命令只用于诊断。
+`.github/workflows/native-ci.yml`从精确远端commit直接编排source/secret、依赖/许可证、Rustfmt、Clippy、locked Cargo tests、官方OAuth ABI provenance、production artifact、专用PostgreSQL 18.4 integration与最终image readiness。根`Dockerfile`只执行locked production build并组装标准PostgreSQL runtime image，不承载测试、scanner或临时cluster。
 
-一次性 bootstrap 期间，workflow 接受 `issue-116-extract-pggomtm` push。进入 `main` 后，普通开发只接受面向 `main` 的 Pull Request（PR）和 `main` push；Agent 创建或更新短期 PR、等待 required `Native CI`、处理失败，并在 GitHub 治理启用后设置 auto-merge。公开 fork PR 始终使用无 secret、read-only token，workflow 禁止 `pull_request_target`。
+维护者与Agent可以把范围明确的commit直接非force推送到`main`。Main CI失败时保留该commit并用后续commit修复；失败SHA不会产生candidate。面向`main`的Pull Request（PR）是可选贡献入口，公开fork始终使用无secret、read-only token，workflow禁止`pull_request_target`和发布写权限。
 
 使用当前分支定位并等待对应 run：
 
 ```bash
-branch="$(git branch --show-current)"
 gh run list \
   --repo codeh007/mtmpg \
   --workflow native-ci.yml \
-  --branch "$branch" \
+  --branch main \
   --limit 5
 run_id=1234567890123
 gh run watch "$run_id" --repo codeh007/mtmpg --exit-status
 gh run view "$run_id" --repo codeh007/mtmpg --log-failed
 ```
 
-常规 PR/`main` run 使用内容寻址的 GitHub Actions cache 和同 ref 并发取消，不登录 GHCR、不读取发布 secret、不上传正式制品。后续 cold authority mode 负责无缓存复验；trusted candidate/promotion workflow 只从受保护 `main` 的精确 commit 取得最小写权限。
+CI测试jobs保持`contents: read`并使用内容寻址cache。只有仓库自身成功的`main` push在全部门禁通过后，candidate job才取得最小`packages: write`、`id-token: write`和attestation权限。
 
-### 可选的本地诊断
-
-需要定位Docker或runner差异时，可以构建本地诊断image。它不能替代远端run：
-
-```bash
-DOCKER_BUILDKIT=1 docker build \
-  --platform linux/amd64 \
-  --pull \
-  --progress=plain \
-  --tag pggomtm-diagnostic:local \
-  .
-```
-
-需要单独定位测试gate时，追加`--target pgx-oauth-gate`并使用明显的diagnostic tag。不要部署该image或其中的gate module。
-
-构建阶段先在 `/src/target/release/libpggomtm.so` 生成无 gate module。最终镜像把它重命名并安装到 `/usr/lib/postgresql/18/lib/pggomtm.so`。该路径来自当前 `postgres:18.4-bookworm` 镜像；非容器环境必须以目标系统的 `pg_config --pkglibdir` 为准。
+本地工作区只用于源码与OpenSpec编辑、Git操作和只读调查。不得在本地运行Docker build/run、Cargo或原生编译、临时PostgreSQL cluster和image检查；相关入口在`GITHUB_ACTIONS!=true`时拒绝并指向Native CI。帮助、纯fixture policy命令和已知对象的精确清理不受此限制。
 
 ## 公开 GHCR 与部署身份
 
@@ -89,60 +73,14 @@ Package 发布后，消费者不需要 private pull credential，但必须使用
 ghcr.io/codeh007/mtmpg-postgres@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
-该 64 位值只是格式示例。`latest`、SemVer tag 与 source tag 只用于发现，不能作为部署身份。Candidate 先从受保护 `main` 的精确 commit 构建一次；gomtmui 验收同一 digest 后，promotion 只能给该 digest 增加 stable alias 和 immutable Release，不得重建。
-
-## 只用于本地候选诊断的安装
-
-当前仓库没有生产支持的稳定制品。以下步骤只用于与支持矩阵完全相同的隔离本地诊断，不是未来 GHCR consumer 的安装路径；它要求先按[运行时配置契约](docs/runtime-configuration.md)提供只读材料，并只验证当前正式callback的候选allow/deny行为：
-
-1. 确认对应远端commit的`Native CI`已经成功；若要执行本地安装演练，再从同一commit生成`pggomtm-diagnostic:local` final image。
-2. 停止整个候选 PostgreSQL 实例，确保没有 backend 已加载旧 `.so`。
-3. 从 final image 创建临时 container，并从当前 final 路径复制 `pggomtm.so`。
-4. 删除临时 container，验证目标 `pg_config` 报告 PostgreSQL 18.4，再把 module 安装到真实 `pkglibdir`。
-5. 在固定路径提供权限正确的候选config/public JWKS，并在 `postgresql.conf` 中配置 validator library。
-6. 启动或重建全部 backend，确认startup建立snapshot，再运行候选allow/deny路径验证。
-
-在实例停止后执行以下提取与安装命令。清理函数会在命令失败时删除临时 container 和目录：
-
-```bash
-set -euo pipefail
-candidate_dir="$(mktemp -d)"
-candidate_container=
-cleanup_candidate() {
-  if test -n "$candidate_container"; then
-    docker rm --force "$candidate_container" >/dev/null 2>&1 || true
-  fi
-  rm -rf "$candidate_dir"
-}
-trap cleanup_candidate EXIT
-
-candidate_container="$(docker create pggomtm-diagnostic:local)"
-docker cp \
-  "${candidate_container}:/usr/lib/postgresql/18/lib/pggomtm.so" \
-  "$candidate_dir/pggomtm.so"
-docker rm "$candidate_container" >/dev/null
-candidate_container=
-test "$(pg_config --version)" = "PostgreSQL 18.4"
-pkglibdir="$(pg_config --pkglibdir)"
-install -m 0644 "$candidate_dir/pggomtm.so" "$pkglibdir/pggomtm.so"
-cleanup_candidate
-trap - EXIT
-```
-
-在 `postgresql.conf` 中使用以下配置：
-
-```ini
-oauth_validator_libraries = 'pggomtm'
-```
-
-这里不运行 `CREATE EXTENSION`。不要在仍有 backend 运行时覆盖已加载的 `.so`，也不要把测试 gate feature 或内置测试 JWKS 带入候选配置。
+该64位值只是格式示例。`latest`、SemVer tag与source tag只用于发现，不能作为部署身份。Candidate从成功`main`的精确commit只构建并push一次；gomtmui验收同一digest后，promotion只能给该digest增加stable alias和immutable Release，不得重建。
 
 ## 候选升级与回退
 
 候选切换必须以已验证构建为单位，并通过重建或重启 backend 生效：
 
 1. 记录当前源 commit、PostgreSQL 18.4 环境和候选 module 身份。
-2. 从 clean checkout 构建并验证替代候选。
+2. 选择已经由远端Actions构建并验证的替代candidate完整digest。
 3. 停止所有受影响的 PostgreSQL backend；若平台先排空连接，必须等待旧 backend 全部退出。
 4. 在 backend 全部停止后，切换到已经验证且身份固定的候选镜像或 module。
 5. 启动或重建全部 backend，再运行 loader、拒绝路径和 ABI 门禁。
@@ -155,7 +93,7 @@ oauth_validator_libraries = 'pggomtm'
 
 - 阅读[贡献指南](CONTRIBUTING.md)后再提交代码或文档变更。
 - 阅读[维护规则](MAINTAINERS.md)了解源码权威与人工审查门禁。
-- 阅读[GitHub 治理状态](docs/github-governance.md)了解 development `main`、Agent auto-merge 与远端服务端门禁。
+- 阅读[GitHub 治理状态](docs/github-governance.md)了解development `main`、Actions权限与远端制品门禁。
 - 阅读[发布与兼容契约](docs/release-and-compatibility.md)了解公开 GHCR、SemVer、manifest、stable 门禁和 digest 回退规则。
 - 使用[mtmpg #1](https://github.com/codeh007/mtmpg/issues/1)跟踪公开主线、candidate、跨仓库验收与首个 stable release。
 - 按[安全政策](SECURITY.md)私密报告可能泄露 secret 或影响认证边界的问题。

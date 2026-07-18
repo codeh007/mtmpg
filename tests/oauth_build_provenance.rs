@@ -57,7 +57,7 @@ impl Drop for TempTree {
 }
 
 #[test]
-#[ignore = "Docker 构建权威显式运行这个真实 generator 负向门禁"]
+#[ignore = "Native CI 的 ABI 步骤显式运行这个真实 generator 负向门禁"]
 fn real_generator_rejects_unapproved_provenance_inputs() {
     let fixture = TempTree::new();
     let build_script = current_build_script();

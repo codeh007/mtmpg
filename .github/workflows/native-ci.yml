@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - issue-116-extract-pggomtm
   pull_request:
     branches:
       - main
@@ -21,10 +20,11 @@ env:
   BUILDX_METADATA_PROVENANCE: "disabled"
   DOCKER_BUILD_RECORD_UPLOAD: "false"
   DOCKER_BUILD_SUMMARY: "false"
+  PGGOMTM_NATIVE_CONTAINER: pggomtm-native-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
-  native-authority:
-    name: Native authority
+  native-ci:
+    name: Native CI gates
     runs-on: ubuntu-24.04
     timeout-minutes: 120
 
@@ -52,10 +52,71 @@ jobs:
           PGGOMTM_GITLEAKS_BIN: ${{ runner.temp }}/public-readiness-bin/gitleaks
         run: scripts/public-readiness scan-source "$GITHUB_WORKSPACE"
 
+      - name: Verify native container entrypoint policy
+        shell: bash
+        run: tests/native_container_entrypoint.sh
+
+      - name: Verify native test entrypoint policy
+        shell: bash
+        run: tests/native_test_entrypoint.sh
+
+      - name: Verify PostgreSQL integration entrypoint policy
+        shell: bash
+        run: tests/postgres_integration_entrypoint.sh
+
+      - name: Verify image readiness entrypoint policy
+        shell: bash
+        run: tests/image_readiness_entrypoint.sh
+
+      - name: Create pinned native toolchain container
+        shell: bash
+        run: scripts/native-container create
+
+      - name: Prepare pinned native toolchain
+        shell: bash
+        run: scripts/native-container prepare
+
+      - name: Verify shell and source policies
+        shell: bash
+        run: scripts/native-container exec policy
+
+      - name: Audit dependencies and licenses
+        shell: bash
+        run: scripts/native-container exec dependencies
+
+      - name: Run Rustfmt and Clippy
+        shell: bash
+        run: scripts/native-container exec quality
+
+      - name: Run Cargo test matrices
+        shell: bash
+        run: scripts/native-container exec cargo-tests
+
+      - name: Verify official OAuth ABI provenance
+        shell: bash
+        run: scripts/native-container exec abi
+
+      - name: Verify production module
+        shell: bash
+        run: scripts/native-container exec production-artifact
+
+      - name: Stage PostgreSQL integration artifacts
+        shell: bash
+        run: scripts/native-container exec stage-integration
+
+      - name: Run PostgreSQL 18.4 integration matrices
+        shell: bash
+        run: tests/postgres_integration.sh run target/native-integration
+
+      - name: Remove native toolchain container
+        if: ${{ always() }}
+        shell: bash
+        run: scripts/native-container destroy
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-      - name: Build and verify the native authority graph
+      - name: Build final PostgreSQL image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -63,10 +124,15 @@ jobs:
           platforms: linux/amd64
           pull: true
           push: false
-          load: false
+          load: true
           provenance: false
           sbom: false
           tags: mtmpg-native-ci:${{ github.sha }}
-          no-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/issue-116-extract-pggomtm' }}
+          build-args: |
+            SOURCE_REVISION=${{ github.sha }}
           cache-from: type=gha,scope=mtmpg-native-ci
           cache-to: type=gha,mode=max,scope=mtmpg-native-ci
+
+      - name: Verify final PostgreSQL image
+        shell: bash
+        run: scripts/image-readiness verify "mtmpg-native-ci:${GITHUB_SHA}" "$GITHUB_SHA"

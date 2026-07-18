@@ -4,13 +4,12 @@ set -euo pipefail
 umask 077
 export LC_ALL=C
 
-readonly BUILD_IDENTITY_SCHEMA="pggomtm-build-identity/v1"
-readonly BUILD_MANIFEST_SCHEMA="pggomtm-build-manifest/v1"
-readonly BUILD_IDENTITY_FILE="pggomtm_build_identity.json"
+SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_ROOT
+readonly BUILD_METADATA_BIN="${PGGOMTM_BUILD_METADATA_BIN:-${SCRIPT_ROOT}/build-metadata}"
 readonly MODULE_LOGICAL_PATH="/usr/lib/postgresql/18/lib/pggomtm.so"
 readonly LICENSE_LOGICAL_PATH="/usr/share/doc/pggomtm/LICENSE"
 readonly MANIFEST_LOGICAL_PATH="/usr/share/doc/pggomtm/build-manifest.json"
-readonly LICENSE_SHA256="d00a4102edfa58b1d8c98e04635821b84ef7e86baad33d8888f61613322717a3"
 
 readonly READELF_BIN="${PGGOMTM_READELF_BIN:-readelf}"
 readonly NM_BIN="${PGGOMTM_NM_BIN:-nm}"
@@ -40,293 +39,6 @@ regular_file() {
   test -f "${path}" || fail "${label} is not a regular file"
   test ! -L "${path}" || fail "${label} must not be a symbolic link"
   test -r "${path}" || fail "${label} is not readable"
-}
-
-sha256_file() {
-  sha256sum -- "$1" | cut -d' ' -f1
-}
-
-validate_build_identity() {
-  local identity="$1"
-
-  jq --exit-status \
-    --arg schema "${BUILD_IDENTITY_SCHEMA}" '
-      def exact_keys($expected):
-        (keys | sort) == ($expected | sort);
-      def sha256:
-        type == "string" and test("^[0-9a-f]{64}$");
-
-      type == "object"
-      and exact_keys([
-        "dependencies",
-        "features",
-        "module_version",
-        "platform",
-        "postgresql",
-        "rust",
-        "schema"
-      ])
-      and .schema == $schema
-      and (.module_version | type == "string"
-        and test("^[0-9]+[.][0-9]+[.][0-9]+([-+][0-9A-Za-z.-]+)?$"))
-      and .features == ["pg18"]
-      and (.rust | type == "object"
-        and exact_keys(["target", "version"])
-        and .version == "1.97.1"
-        and .target == "x86_64-unknown-linux-gnu")
-      and (.dependencies | type == "object"
-        and exact_keys(["jose_implementation", "jose_version", "pgrx"])
-        and .pgrx == "0.19.1"
-        and .jose_implementation == "jaws"
-        and .jose_version == "1.0.4")
-      and (.postgresql | type == "object"
-        and exact_keys([
-          "oauth_bindings_sha256",
-          "oauth_header_sha256",
-          "pg_version_num",
-          "runtime_base",
-          "runtime_base_sha256",
-          "source_sha256",
-          "source_version"
-        ])
-        and .source_version == "18.4"
-        and .pg_version_num == 180004
-        and (.source_sha256 | sha256)
-        and (.oauth_header_sha256 | sha256)
-        and (.oauth_bindings_sha256 | sha256)
-        and .runtime_base == "postgres:18.4-bookworm"
-        and (.runtime_base_sha256 | sha256))
-      and (.platform | type == "object"
-        and exact_keys(["arch", "libc", "os"])
-        and .os == "linux"
-        and .arch == "amd64"
-        and .libc == "glibc")
-    ' "${identity}" >/dev/null || fail "production build identity is invalid"
-}
-
-select_build_identity() {
-  local identity_root="$1"
-  local output_variable="$2"
-
-  local canonical_root
-  canonical_root="$(realpath -- "${identity_root}")" || \
-    fail "build identity root cannot be resolved"
-  test -d "${canonical_root}" || fail "build identity root is not a directory"
-
-  local inventory="${SESSION_TEMP_ROOT}/build-identities"
-  find "${canonical_root}" -type f -name "${BUILD_IDENTITY_FILE}" -print0 \
-    >"${inventory}" || fail "build identities could not be enumerated"
-
-  local -a production_identities=()
-  local candidate
-  while IFS= read -r -d '' candidate; do
-    jq --exit-status '.schema == "pggomtm-build-identity/v1"' \
-      "${candidate}" >/dev/null || fail "a discovered build identity is invalid"
-    if jq --exit-status '.features == ["pg18"]' "${candidate}" >/dev/null; then
-      production_identities+=("${candidate}")
-    fi
-  done <"${inventory}"
-
-  test "${#production_identities[@]}" -eq 1 || \
-    fail "exactly one production build identity is required"
-  validate_build_identity "${production_identities[0]}"
-  printf -v "${output_variable}" '%s' "${production_identities[0]}"
-}
-
-validate_license() {
-  local license_file="$1"
-
-  regular_file "${license_file}" "MIT license"
-  test "$(sha256_file "${license_file}")" = "${LICENSE_SHA256}" || \
-    fail "MIT license checksum does not match the repository authority"
-}
-
-create_build_manifest() {
-  test "$#" -eq 4 || \
-    fail "create-build-manifest requires identity root, module, license, and output"
-
-  local identity_root="$1"
-  local module_file="$2"
-  local license_file="$3"
-  local output_file="$4"
-
-  regular_file "${module_file}" "production module"
-  validate_license "${license_file}"
-  require_tool jq
-  require_tool sha256sum
-
-  local identity=""
-  select_build_identity "${identity_root}" identity
-
-  local output_parent
-  output_parent="$(dirname -- "${output_file}")"
-  output_parent="$(realpath -- "${output_parent}")" || \
-    fail "build manifest output directory cannot be resolved"
-  test -d "${output_parent}" || fail "build manifest output directory is unavailable"
-
-  local module_sha256
-  module_sha256="$(sha256_file "${module_file}")"
-  local output_temp="${SESSION_TEMP_ROOT}/build-manifest.json"
-  jq --sort-keys --compact-output \
-    --arg schema "${BUILD_MANIFEST_SCHEMA}" \
-    --arg module_path "${MODULE_LOGICAL_PATH}" \
-    --arg module_sha256 "${module_sha256}" \
-    --arg license_path "${LICENSE_LOGICAL_PATH}" \
-    --arg license_sha256 "${LICENSE_SHA256}" '
-      {
-        schema: $schema,
-        module: {
-          name: "pggomtm",
-          version: .module_version,
-          features: .features,
-          path: $module_path,
-          sha256: $module_sha256
-        },
-        rust: .rust,
-        dependencies: .dependencies,
-        postgresql: .postgresql,
-        platform: .platform,
-        license: {
-          spdx: "MIT",
-          path: $license_path,
-          sha256: $license_sha256
-        }
-      }
-    ' "${identity}" >"${output_temp}" || fail "build manifest could not be generated"
-
-  install -m 0644 -- "${output_temp}" "${output_file}"
-  verify_build_manifest \
-    "${output_file}" \
-    "${module_file}" \
-    "${license_file}" \
-    "${identity_root}"
-}
-
-validate_manifest_schema() {
-  local manifest="$1"
-
-  jq --exit-status \
-    --arg schema "${BUILD_MANIFEST_SCHEMA}" \
-    --arg module_path "${MODULE_LOGICAL_PATH}" \
-    --arg license_path "${LICENSE_LOGICAL_PATH}" \
-    --arg license_sha256 "${LICENSE_SHA256}" '
-      def exact_keys($expected):
-        (keys | sort) == ($expected | sort);
-      def sha256:
-        type == "string" and test("^[0-9a-f]{64}$");
-
-      type == "object"
-      and exact_keys([
-        "dependencies",
-        "license",
-        "module",
-        "platform",
-        "postgresql",
-        "rust",
-        "schema"
-      ])
-      and .schema == $schema
-      and (.module | type == "object"
-        and exact_keys(["features", "name", "path", "sha256", "version"])
-        and .name == "pggomtm"
-        and (.version | type == "string"
-          and test("^[0-9]+[.][0-9]+[.][0-9]+([-+][0-9A-Za-z.-]+)?$"))
-        and .features == ["pg18"]
-        and .path == $module_path
-        and (.sha256 | sha256))
-      and (.rust | type == "object"
-        and exact_keys(["target", "version"])
-        and .version == "1.97.1"
-        and .target == "x86_64-unknown-linux-gnu")
-      and (.dependencies | type == "object"
-        and exact_keys(["jose_implementation", "jose_version", "pgrx"])
-        and .pgrx == "0.19.1"
-        and .jose_implementation == "jaws"
-        and .jose_version == "1.0.4")
-      and (.postgresql | type == "object"
-        and exact_keys([
-          "oauth_bindings_sha256",
-          "oauth_header_sha256",
-          "pg_version_num",
-          "runtime_base",
-          "runtime_base_sha256",
-          "source_sha256",
-          "source_version"
-        ])
-        and .source_version == "18.4"
-        and .pg_version_num == 180004
-        and (.source_sha256 | sha256)
-        and (.oauth_header_sha256 | sha256)
-        and (.oauth_bindings_sha256 | sha256)
-        and .runtime_base == "postgres:18.4-bookworm"
-        and (.runtime_base_sha256 | sha256))
-      and (.platform | type == "object"
-        and exact_keys(["arch", "libc", "os"])
-        and .os == "linux"
-        and .arch == "amd64"
-        and .libc == "glibc")
-      and (.license | type == "object"
-        and exact_keys(["path", "sha256", "spdx"])
-        and .spdx == "MIT"
-        and .path == $license_path
-        and .sha256 == $license_sha256)
-      and ([paths(scalars) as $path
-        | select(
-            ($path[-1] | type) == "string"
-            and ($path[-1] | ascii_downcase
-              | test("(oci|image).*digest|digest.*(oci|image)"))
-          )] | length == 0)
-      and ([.. | strings
-        | select(
-            test("^sha256:[0-9a-f]{64}$")
-            or test("(?i)(<[^>]*digest[^>]*>|placeholder|(^|[^a-z])tbd([^a-z]|$))")
-          )] | length == 0)
-    ' "${manifest}" >/dev/null || fail "build manifest schema or public metadata is invalid"
-}
-
-verify_build_manifest() {
-  test "$#" -eq 4 || \
-    fail "verify-build-manifest requires manifest, module, license, and identity root"
-
-  local manifest="$1"
-  local module_file="$2"
-  local license_file="$3"
-  local identity_root="$4"
-
-  regular_file "${manifest}" "build manifest"
-  regular_file "${module_file}" "production module"
-  validate_license "${license_file}"
-  require_tool jq
-  require_tool sha256sum
-
-  validate_manifest_schema "${manifest}"
-
-  local identity=""
-  select_build_identity "${identity_root}" identity
-  jq --exit-status \
-    --slurpfile identity "${identity}" '
-      ($identity | length) == 1
-      and .module.version == $identity[0].module_version
-      and .module.features == $identity[0].features
-      and .rust == $identity[0].rust
-      and .dependencies == $identity[0].dependencies
-      and .postgresql == $identity[0].postgresql
-      and .platform == $identity[0].platform
-    ' "${manifest}" >/dev/null || \
-    fail "build manifest does not match the production build identity"
-
-  local canonical="${SESSION_TEMP_ROOT}/canonical-build-manifest.json"
-  jq --sort-keys --compact-output . "${manifest}" >"${canonical}" || \
-    fail "build manifest is not valid JSON"
-  cmp --silent -- "${manifest}" "${canonical}" || \
-    fail "build manifest bytes are not canonical JSON"
-
-  local module_sha256
-  module_sha256="$(sha256_file "${module_file}")"
-  test "$(jq --raw-output '.module.sha256' "${manifest}")" = "${module_sha256}" || \
-    fail "build manifest module checksum does not match the artifact"
-  test "$(jq --raw-output '.license.sha256' "${manifest}")" = "${LICENSE_SHA256}" || \
-    fail "build manifest license checksum does not match the repository authority"
 }
 
 excluded_snapshot_path() {
@@ -576,66 +288,6 @@ verify_elf() {
     fail "production module export set is not approved"
 }
 
-verify_dockerfile() {
-  test "$#" -eq 1 || fail "verify-dockerfile requires exactly one Dockerfile"
-
-  local dockerfile="$1"
-  regular_file "${dockerfile}" "Dockerfile"
-
-  local final_stage="${SESSION_TEMP_ROOT}/dockerfile-final-stage"
-  awk '
-    function trim(value) {
-      sub(/^[ \t]+/, "", value)
-      sub(/[ \t\r]+$/, "", value)
-      return value
-    }
-    function finish_instruction() {
-      instruction = trim(instruction)
-      gsub(/[ \t]+/, " ", instruction)
-      split(instruction, fields, /[ \t]+/)
-      if (toupper(fields[1]) == "FROM") {
-        instruction_count = 0
-      }
-      instructions[++instruction_count] = instruction
-      instruction = ""
-    }
-    {
-      current = trim($0)
-      if (current == "" || substr(current, 1, 1) == "#") {
-        next
-      }
-      continued = sub(/\\[ \t]*$/, "", current)
-      if (instruction == "") {
-        instruction = current
-      } else {
-        instruction = instruction " " current
-      }
-      if (!continued) {
-        finish_instruction()
-      }
-    }
-    END {
-      if (instruction != "") {
-        exit 1
-      }
-      for (entry = 1; entry <= instruction_count; entry++) {
-        print instructions[entry]
-      }
-    }
-  ' "${dockerfile}" >"${final_stage}" || \
-    fail "final Docker stage could not be parsed"
-
-  local expected="${SESSION_TEMP_ROOT}/expected-dockerfile-final-stage"
-  printf '%s\n' \
-    'FROM candidate-content' \
-    'RUN --mount=type=bind,from=candidate-artifact-gate,source=/tmp/pggomtm-candidate-artifact-gate-passed,target=/tmp/pggomtm-candidate-artifact-gate-passed,ro test -f /tmp/pggomtm-candidate-artifact-gate-passed' \
-    'ENTRYPOINT ["docker-entrypoint.sh"]' \
-    'CMD ["postgres"]' \
-    >"${expected}"
-  cmp --silent -- "${final_stage}" "${expected}" || \
-    fail "final Docker stage contains an unapproved instruction or configuration"
-}
-
 root_path() {
   local root="$1"
   local logical_path="$2"
@@ -731,11 +383,13 @@ main() {
   case "${command}" in
     create-build-manifest)
       shift
-      create_build_manifest "$@"
+      test -x "${BUILD_METADATA_BIN}" || fail "build-metadata is unavailable"
+      "${BUILD_METADATA_BIN}" create "$@"
       ;;
     verify-build-manifest)
       shift
-      verify_build_manifest "$@"
+      test -x "${BUILD_METADATA_BIN}" || fail "build-metadata is unavailable"
+      "${BUILD_METADATA_BIN}" verify-build "$@"
       ;;
     snapshot-filesystem)
       shift
@@ -749,16 +403,12 @@ main() {
       shift
       verify_elf "$@"
       ;;
-    verify-dockerfile)
-      shift
-      verify_dockerfile "$@"
-      ;;
     verify-runtime)
       shift
       verify_runtime "$@"
       ;;
     *)
-      fail "expected command: create-build-manifest, verify-build-manifest, snapshot-filesystem, verify-filesystem, verify-elf, verify-dockerfile, or verify-runtime"
+      fail "expected command: create-build-manifest, verify-build-manifest, snapshot-filesystem, verify-filesystem, verify-elf, or verify-runtime"
       ;;
   esac
 }

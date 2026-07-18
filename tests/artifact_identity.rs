@@ -60,17 +60,6 @@ fn build_variant_has_a_complete_comparable_artifact_identity() {
         include_str!("../rust-toolchain.toml").contains("channel = \"1.97.1\""),
         "tracked Rust toolchain must match the identity"
     );
-    for fixed_input in [
-        POSTGRESQL_SOURCE_SHA256,
-        OAUTH_HEADER_SHA256,
-        RUNTIME_BASE_SHA256,
-        "--target x86_64-unknown-linux-gnu",
-    ] {
-        assert!(
-            include_str!("../Dockerfile").contains(fixed_input),
-            "Docker build authority must contain identity input {fixed_input}"
-        );
-    }
 }
 
 fn expected_features() -> Vec<&'static str> {

@@ -12,7 +12,7 @@
 - Lock 语义：`--locked`
 - 配置权威：[`deny.toml`](../deny.toml)
 
-Docker build 从 cargo-deny 官方 GitHub Release 下载精确版本，先验证固定 SHA-256，再执行审计。不得使用未固定的 action、系统包、`cargo install` 最新版或开发者本机工具替代远端 Docker authority。
+GitHub Actions中的固定native toolchain container从cargo-deny官方GitHub Release下载精确版本，先验证固定SHA-256，再由`scripts/native-test dependencies`执行审计。该入口在普通本地环境拒绝运行；不得使用未固定的action、系统包、`cargo install`最新版或开发者本机工具替代远端Actions结果。
 
 ## RustSec 例外
 

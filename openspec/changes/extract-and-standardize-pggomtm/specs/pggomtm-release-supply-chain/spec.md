@@ -1,178 +1,133 @@
 ## ADDED Requirements
 
-### Requirement: mtmpg必须是pggomtm唯一源码与构建权威
-`codeh007/mtmpg` SHALL 在仓库根目录维护唯一 `pggomtm` crate、lockfile、toolchain、Docker build graph、tests 和 release workflow。根 `Dockerfile` SHALL 是唯一构建图权威，GitHub Actions SHALL 是执行该构建图并形成 task、consumer 与发布证据的唯一权威。gomtmui 或其他消费者 MUST NOT 保留 vendored 源码、submodule、subtree、第二 Docker build 或可运行 fallback；Cargo `target/`、本地 image、secret 和运行数据 MUST NOT 进入迁移或 Git history。
+### Requirement: mtmpg必须是唯一源码与镜像权威
+`codeh007/mtmpg` SHALL维护唯一`pggomtm` crate、lockfile、toolchain、tests、CI和PostgreSQL image定义。Gomtmui与其他消费者MUST NOT保留Rust源码副本、submodule、第二Dockerfile、本地image fallback或现场编译路径。
 
-#### Scenario: 从gomtmui迁移原型
-- **WHEN** 迁移现有 `gomtmui/native/pggomtm` 原型
-- **THEN** mtmpg SHALL 用文件清单和源码 checksum 证明所有权威源码与测试已迁入、`target/` 已排除且既有门禁行为未改变
+#### Scenario: gomtmui消费pggomtm
+- **WHEN** gomtmui部署带有pggomtm的PostgreSQL
+- **THEN** 它 SHALL引用mtmpg发布的完整OCI digest和versioned contract，不得重新构建module
 
-#### Scenario: 消费者需要pggomtm
-- **WHEN** gomtmui 构建或部署 PostgreSQL candidate
-- **THEN** 它 SHALL 消费 mtmpg 发布的固定 OCI digest 和 versioned contract，不得从本地 Rust 目录重新构建
+### Requirement: Main必须是唯一持续集成与交付来源
+远端`main` SHALL作为源码持续集成线，并MAY由维护者或Agent直接非force推进。仓库MUST NOT要求临时Issue分支、required Pull Request、branch protection、approving review、squash-only或auto-merge作为更新`main`的前置条件。Workflow MUST NOT包含临时分支名称或Issue编号trigger。
 
-#### Scenario: 本地构建成功
-- **WHEN** 开发者本地 `docker build`、测试命令或 image tag 成功
-- **THEN** 结果 MAY 用于定位问题，但 MUST NOT 完成 OpenSpec task、gomtmui consumer gate、release readiness 或发布证据
+`main` MAY暂时处于CI失败状态；失败commit MUST保留在历史中并由后续commit修复，MUST NOT发布candidate、更新stable alias或覆盖既有制品。Git历史和已发布引用MUST NOT force rewrite。
 
-### Requirement: 公开仓库必须具备可由Agent维护的受保护开发主线
-公开仓库的默认 `main` SHALL 包含 README、MIT LICENSE、SECURITY、CONTRIBUTING、维护/发布说明、Cargo manifest、OpenSpec、源码和唯一 workflow。首次 bootstrap 后，branch ruleset SHALL 要求普通变更经 Pull Request、必需 Native CI、线性历史和讨论解决后进入 `main`，并 SHALL 禁止 force push 与 branch deletion。Required approving review 数 SHALL 为零，仓库 SHALL 启用 squash-only、auto-merge 和合并后删分支，使单贡献者场景中的 Agent 能创建、更新、验证和自动合并 Issue 范围内的 PR。Native 认证依赖、Rust toolchain、PostgreSQL minor、Actions source/pin 与 release workflow 变化仍 MUST 有显式技术审查证据，不得无条件自动合并。
+#### Scenario: 直接更新main
+- **WHEN** 维护者或Agent向`main`非force推送一个源码commit
+- **THEN** GitHub Actions SHALL验证该精确commit，且仓库不得要求先创建或人工维护PR
 
-#### Scenario: 建立公开默认分支基线
-- **WHEN** 追溯 public-readiness、bootstrap cold CI、whole-branch review 和 source identity 核对全部通过
-- **THEN** 已审查远端功能分支 SHALL 以非 force fast-forward 原样进入 `main`，随后删除功能分支并启用 ruleset，且该推进 MUST NOT 创建 stable tag、Release、version alias 或 `latest`
+#### Scenario: Main验证失败
+- **WHEN** `main`上的任一必需测试或image检查失败
+- **THEN** 该commit SHALL继续作为源码历史存在，但所有package、attestation、tag、Release和stable更新 SHALL fail closed
 
-#### Scenario: Agent维护普通PR
-- **WHEN** Agent 为一个已限定 Issue 创建普通短期 PR 且所有必需检查通过
-- **THEN** Agent SHALL 启用 auto-merge，GitHub SHALL squash 合并并删除源分支，不要求不存在的第二贡献者批准
+#### Scenario: 外部贡献者提交PR
+- **WHEN** 公开Pull Request面向`main`
+- **THEN** workflow MAY执行只读验证，但MUST NOT取得package、Release、attestation或跨仓写权限
 
-#### Scenario: 高风险依赖或发布权限变化
-- **WHEN** PR 修改 pgrx、JOSE、Rust toolchain、PostgreSQL minor、批准 action、release workflow 或 workflow 写权限
-- **THEN** PR SHALL 记录上游 diff、风险、精确验证与独立技术审查结论，缺少任一证据时 MUST NOT 启用 auto-merge
+### Requirement: 重计算必须只在GitHub Actions执行
+mtmpg的开发测试、原生编译、临时PostgreSQL cluster、Docker build/run和最终image检查 SHALL只在GitHub-hosted Actions runner执行。共享本地工作区MUST NOT执行这些重计算；本地只允许源码/规划编辑、Git/OpenSpec操作、只读调查和对既有诊断对象的精确清理。
 
-#### Scenario: Workflow请求权限
-- **WHEN** 普通 CI 或 trusted candidate/release workflow 运行
-- **THEN** 普通 CI SHALL 只有 read 权限，trusted job SHALL 只在 job 级取得写 GHCR、Release 和 attestation 所需的最小权限
+承载重计算的脚本 SHALL在非GitHub Actions环境拒绝执行，帮助和纯fixture policy命令除外。仓库MUST NOT以本地image、container、tag或终端日志作为task、consumer或release证据，也MUST NOT使用宽泛Docker prune清理共享主机。
 
-### Requirement: 已公开仓库必须完成追溯式public-readiness并持续防泄漏
-仓库已经公开，因此系统 SHALL 立即执行不回显敏感值的追溯式 public-readiness，覆盖全部 Git refs/history、tracked 与 uncommitted 文件、Docker build context、workflow 源码与日志、Actions artifact/cache、最终 image、Release/package 及 GitHub Issue/PR 内容。真实 secret MUST 先吊销或轮换，再按明确批准处置 history 和远端材料；重新设为 private、删除日志或补写文档 MUST NOT 被解释为撤销既有暴露。合成 fixture 只允许按精确路径、精确模式和理由分类，MUST NOT 使用全局 ignore。首次处置后，PR、cold 与 release lane SHALL 持续执行相同类别的脱敏扫描。
+#### Scenario: Agent尝试本地构建
+- **WHEN** Agent在普通本地工作区调用mtmpg Docker build、Docker run、原生编译或PostgreSQL integration入口
+- **THEN** 入口 SHALL在消耗重计算资源前拒绝，并指向GitHub Actions workflow
 
-#### Scenario: 仓库已在门禁前公开
-- **WHEN** public visibility 已经发生但没有完整 public-readiness 证据
-- **THEN** change SHALL 把状态记录为待追溯处置，不得倒推声称公开前门禁通过，也不得仅因默认 `main` 尚未包含源码而跳过其他公开 ref
+#### Scenario: Actions执行相同入口
+- **WHEN** `GITHUB_ACTIONS=true`的固定runner运行CI
+- **THEN** 入口 SHALL执行完整测试和制品检查，并在结束后清理container、PGDATA、config和fixture
 
-#### Scenario: 追溯扫描只有合成哨兵命中
-- **WHEN** scanner 只命中用于证明门禁有效的确定性哨兵或公开 fixture
-- **THEN** 维护者 SHALL 记录精确路径、模式和理由后继续门禁，且不得放宽其他文件、历史或 secret 类别
+### Requirement: Dockerfile必须只构建标准PostgreSQL runtime image
+根`Dockerfile` SHALL使用固定Rust/toolchain/lock与PostgreSQL 18.4 development inputs构建production`pggomtm.so`，并 SHALL从固定digest的官方`postgres:18.4-bookworm`组装最终image。最终image SHALL保留官方entrypoint、default command、volume、stop signal、initdb与postgres用户语义，只增加正式module、MIT license和非敏感build metadata。
 
-#### Scenario: 追溯扫描发现真实secret
-- **WHEN** 任一 ref、history、工作树、日志、artifact、cache、image 或协作内容包含真实 credential 或私密材料
-- **THEN** 相关 credential SHALL 先被吊销或轮换，合并与发布 MUST 暂停，只有批准的 history/remote 处置和完整重扫通过后才能继续
+Dockerfile MUST NOT运行单元测试、集成测试、PostgreSQL test cluster、lint、依赖/许可证审计、secret扫描或CI policy；MUST NOT复制tests、fixture、gate module、Rust toolchain、Cargo target、源码、JWKS/config、PGDATA或secret到最终image。
 
-#### Scenario: 旧Actions cache无法可信审计
-- **WHEN** 公开前产生的 BuildKit cache 不能逐项证明只含批准的公开输入
-- **THEN** 全部相关 cache SHALL 被删除，并 SHALL 从 clean checkout 的无缓存 cold build 建立新的可信 cache 起点
+#### Scenario: 构建最终image
+- **WHEN** 成功的`main` CI在全部外部测试通过后构建Dockerfile
+- **THEN** 结果 SHALL是可按官方方式启动的PostgreSQL 18.4 image，且`pggomtm.so`位于真实`pg_config --pkglibdir`
 
-### Requirement: CI必须从固定输入重复验证native安全边界
-每个 Pull Request 与 `main` push SHALL 对 locked dependencies 运行 Rustfmt、Clippy `-D warnings`、unit/integration tests、依赖与许可证审计、官方 header binding/layout 与最终字节同一性、真实 PG18 loader/OAuth 正负矩阵、动态依赖、secret 和 artifact 隔离扫描。CI MUST 从远端可达的精确 source commit 运行并使用固定 Rust、pgrx、JOSE、PostgreSQL source/runtime digest 和 full-SHA actions。普通 PR/`main` lane SHALL 使用内容寻址的 BuildKit/GitHub Actions cache；cold authority SHALL 从 clean checkout 无缓存复验；trusted candidate/release SHALL 只接受受保护 `main` ancestry 上的精确 commit。
+#### Scenario: Dockerfile尝试执行测试
+- **WHEN** Dockerfile新增Cargo test、test fixture、临时cluster、scanner或测试成功marker
+- **THEN** source policy SHALL失败并要求把该逻辑放回Actions调用的测试入口
 
-#### Scenario: Bootstrap前运行最终cold门禁
-- **WHEN** workflow 尚未存在于默认分支且最终功能分支准备进入 `main`
-- **THEN** 唯一 workflow MAY 通过一次性 feature-push cold 路径在无 secret、无缓存上下文验证 exact remote HEAD，且该路径不得成为永久第二 CI 实现
+### Requirement: Native CI必须直接运行Rust与PostgreSQL测试
+每个`main` push SHALL由GitHub Actions直接运行固定版本的Rustfmt、Clippy`-D warnings`、locked Cargo tests、依赖/许可证/secret检查、官方OAuth header/layout与bindings最终字节同一性测试，以及临时PostgreSQL 18.4上的loader、startup、OAuth allow/deny、identity、失败脱敏和production artifact测试。可选PR lane SHALL运行同一只读验证。
 
-#### Scenario: 日常PR或main验证
-- **WHEN** Pull Request 或 `main` push 触发普通验证
-- **THEN** workflow SHALL 使用 GitHub-hosted runner、read-only token、BuildKit cache 和同 ref 并发取消运行唯一 Docker build graph，且不得登录 GHCR、读取 release credential 或上传正式制品
+测试逻辑 SHALL位于Rust tests、C/SQL probe或专用测试脚本，不得编码在Dockerfile layer中。Workflow MAY使用内容寻址cache，但MUST NOT以独立scheduled cold/cache清理仪式作为发布前提。
 
-#### Scenario: 冷门禁复验固定commit
-- **WHEN** schedule、workflow dispatch 或发布前门禁验证一个批准的远端 commit
-- **THEN** workflow SHALL 从 clean checkout 对固定输入执行无缓存完整 build graph并保存 source、run 与验证摘要，且不得用普通 cached run 冒充 cold authority 证据
+#### Scenario: Main CI验证变更
+- **WHEN** `main` push触发Native CI
+- **THEN** 每类门禁 SHALL有独立可定位结果，任一失败 SHALL阻止candidate job
 
-#### Scenario: Public fork提交PR
-- **WHEN** 非受信 fork 代码触发公开仓库 PR 验证
-- **THEN** workflow SHALL 只使用 GitHub-hosted 临时 runner 和 read-only token，不得使用 `pull_request_target`、package/Release 写权限、attestation 写权限或任何 secret
+#### Scenario: 运行PostgreSQL集成测试
+- **WHEN** Actions验证OAuth validator runtime
+- **THEN** harness SHALL创建隔离的临时PG18.4 cluster、安装对应gate module、运行正负矩阵并在结束后清理PGDATA
 
-#### Scenario: ABI或供应链门禁失败
-- **WHEN** header/layout、OAuth 矩阵、lock 审计、动态依赖、secret 扫描或 artifact 隔离任一失败
-- **THEN** CI SHALL fail closed且不得发布 image、Release 或成功 attestation
+#### Scenario: 使用pgrx测试工具
+- **WHEN** 测试需要PostgreSQL进程内能力
+- **THEN** 项目 MAY使用兼容非SQL-extension加载协议的pgrx工具，但 MUST NOT伪造control/SQL/`CREATE EXTENSION`契约来满足`cargo pgrx test`
 
-### Requirement: GHCR派生PostgreSQL image必须公开读取且按digest消费
-Trusted candidate workflow SHALL 发布基于精确官方 `postgres:<minor>-bookworm@sha256:<digest>` 的 `ghcr.io/codeh007/mtmpg-postgres` image，只把正式 `libpggomtm.so`、MIT license 和非敏感 build manifest 加入真实 `pg_config --pkglibdir`。Image MUST 保持官方 entrypoint，MUST NOT 包含 JWKS/config、私钥、token、数据库 data、gomtmui 源码、Rust toolchain、Cargo target 或测试 gate。Package SHALL 公开读取，但写权限 SHALL 只授予受保护 `main` 上的 trusted job。消费者 MUST 始终按完整 OCI digest 部署。
+### Requirement: 最终image必须经过独立制品检查
+Actions SHALL在Docker build完成后独立检查官方base layer/config、PostgreSQL 18.4版本、entrypoint/command/volume/stop signal/user、module位置与加载、动态依赖、ELF identity、filesystem增量和build metadata。检查 MUST证明最终image不含测试feature、fixture、credential、运行数据、源码或构建工具。
 
-#### Scenario: 构建candidate runtime image
-- **WHEN** trusted candidate workflow 从受保护 `main` 的精确 commit完成 native 与真实 PG 测试
-- **THEN** workflow SHALL 只构建一次并发布 source-discovery tag、不可变 OCI digest 与关联供应链材料，不得提前创建 stable SemVer alias 或 `latest`
+#### Scenario: Image包含测试或构建内容
+- **WHEN** filesystem、ELF、string或SBOM扫描发现gate feature、fixture、Cargo target、compiler、source、JWKS working copy或PGDATA
+- **THEN** candidate发布 SHALL fail closed
 
-#### Scenario: 匿名读取公开package
-- **WHEN** 未携带 registry credential 的消费者拉取已公开 `mtmpg-postgres` package
-- **THEN** registry MAY 允许读取 image，但任何上传、删除、改标或 Release 操作 MUST 继续要求 trusted workflow 的最小写权限
+#### Scenario: 官方runtime语义被覆盖
+- **WHEN** candidate的entrypoint、command、volume、stop signal、user、环境或base layer前缀与固定官方image不一致
+- **THEN** image readiness SHALL失败且不得发布candidate
 
-#### Scenario: 正式环境选择image
-- **WHEN** gomtmui candidate 或后续环境部署 pggomtm
-- **THEN** 配置 SHALL 使用完整 OCI digest，且不得只引用 `latest`、version tag、source tag 或本地 `gomtm-pggomtm:*` tag
+### Requirement: 成功main commit必须只发布一次公开candidate
+只有仓库自身成功的`main` push MAY取得job级最小package、id-token与attestation写权限。Candidate job SHALL从精确`GITHUB_SHA`构建并推送一次`ghcr.io/codeh007/mtmpg-postgres`，产生不可变完整OCI digest；MUST NOT从PR、fork、临时分支、失败job或本地image发布。
 
-### Requirement: Build manifest与release manifest必须避免循环身份
-Image 内 build manifest SHALL 只记录在 OCI digest 产生前可确定的 module version、features、toolchain、dependencies、PostgreSQL source/header/runtime base、target、arch、libc 与 `.so` digest，MUST NOT 记录 image 自身 OCI digest。Image digest 产生后，trusted workflow SHALL 生成外部 `release-manifest.json`，绑定 remote source commit、module/contract、PG build/test minor、header/base、target、`.so`/OCI digest 与 native 验证矩阵，并 SHALL 用不可变 OCI 关联材料或 GitHub attestation 绑定其身份。
+Package SHALL公开读取。完整OCI digest SHALL作为部署身份；source tag只能用于发现。Candidate阶段MUST NOT创建stable SemVer alias、`latest`或GitHub Release。
 
-#### Scenario: 生成image内build manifest
-- **WHEN** Docker build 尚未产生最终 OCI digest
-- **THEN** build manifest SHALL 提供可比较构建事实但 MUST NOT 包含占位、自引用或预计算的 image digest
+#### Scenario: Main全部门禁成功
+- **WHEN** `main`精确commit的native、security、integration与image gates全部通过
+- **THEN** candidate job SHALL构建并推送一次image，输出公开可读取的完整digest和source identity
 
-#### Scenario: 生成外部release manifest
-- **WHEN** candidate image 已经产生完整 OCI digest
-- **THEN** workflow SHALL 从同一 build result 生成外部 manifest并验证 source、`.so` 与 OCI digest 一致，且不得重建 image 来补写其内部文件
+#### Scenario: 发布条件不满足
+- **WHEN** event不是仓库自身`main` push或任一前置job失败
+- **THEN** workflow SHALL不登录或写入GHCR，也不得请求Release或attestation写权限
 
-### Requirement: Release manifest必须版本化跨仓库消费契约
-`release-manifest.json` SHALL 至少记录 source commit、module version、database-token contract version、authn-id version、Rust/pgrx/JOSE、PostgreSQL build/test minor 与 `PG_VERSION_NUM`、OAuth header digest、base image digest、target、arch、libc、`.so` digest、OCI digest 和 native 验证矩阵。Manifest 创建后 MUST 不可变。Gomtmui SHALL 在更新消费 digest 前验证全部字段与正负向 contract vectors，并 SHALL 产生单独绑定 manifest digest、OCI digest 和 consumer source 的 E2E evidence；consumer evidence MUST NOT 改写 candidate manifest。
+#### Scenario: 消费者选择image
+- **WHEN** gomtmui更新PostgreSQL service
+- **THEN** Compose SHALL使用`ghcr.io/codeh007/mtmpg-postgres@sha256:<digest>`，不得使用本地tag或浮动tag
 
-#### Scenario: gomtmui升级pggomtm
-- **WHEN** gomtmui PR 选择新的 mtmpg candidate digest
-- **THEN** consumer gate SHALL 校验 manifest、contract version、PG variant、artifact digest、attestation 和正负向 token/identity vectors 后才允许 candidate 部署
+### Requirement: Release材料必须绑定同一制品
+Image内build metadata SHALL记录source、toolchain、PostgreSQL/base、module和`.so` digest，但 MUST NOT记录尚未产生的自身OCI digest。OCI digest产生后，同一candidate job SHALL从同一build result生成外部`release-manifest.json`、SBOM、provenance和attestation，并 SHALL将source、`.so`、OCI digest与native matrix绑定。
 
-#### Scenario: Contract或runtime不兼容
-- **WHEN** token/authn contract、PG minor、arch、libc、base digest、artifact digest 或验证状态与目标平台不匹配
-- **THEN** gomtmui SHALL 拒绝该 artifact且不得回退本地 build 或旧协议适配器
+Workflow MUST NOT重建image来补写metadata。Manifest、SBOM、attestation和checksum中的source/module/image身份 MUST精确一致且不含credential。
 
-#### Scenario: 跨仓库E2E完成
-- **WHEN** gomtmui 对 candidate source/manifest/OCI digest 完成真实 PG18 与产品 E2E
-- **THEN** consumer evidence SHALL 精确绑定三者及 gomtmui source，且原 candidate manifest 和 image MUST 保持字节不变
+#### Scenario: 生成release manifest
+- **WHEN** candidate OCI digest已经产生
+- **THEN** workflow SHALL从同一build result生成外部材料并证明它们绑定该digest，不得重建image
 
-### Requirement: GitHub Release必须不可变且复用已验证candidate bytes
-每个 stable Git tag SHALL 对应一个 immutable GitHub Release，包含按 target 命名的 `.so` bundle、`SHA256SUMS`、MIT license、candidate release manifest、consumer evidence、SBOM 与 provenance/attestation。Stable promotion SHALL 从已验收 OCI digest 提取相同 `.so`并比较其 digest后打包，MUST NOT 重新运行 Cargo、重新构建 image 或改变 attestation identity。Actions 临时 artifact MUST NOT 成为正式分发入口；Release 创建后 tag、asset 与 manifest MUST NOT 被覆盖或替换。
+#### Scenario: 供应链身份不一致
+- **WHEN** source、module digest、OCI digest、SBOM、provenance或attestation任一不匹配
+- **THEN** candidate SHALL标记为不可消费且stable promotion SHALL失败
 
-#### Scenario: 发布PG18.4 amd64 stable变体
-- **WHEN** 同一 candidate digest 的 native、cold、consumer E2E 与 rollback 门禁全部通过
-- **THEN** Release SHALL 包含 `pggomtm-<version>-pg18.4-linux-amd64-glibc.tar.zst`、checksum、manifest、consumer evidence、SBOM 与 provenance，且 bundle 中 `.so` digest SHALL 与 candidate manifest一致
+### Requirement: gomtmui必须远端验证真实消费契约
+Gomtmui SHALL在candidate环境中只替换`docker-compose.yml`的PostgreSQL image完整digest，并通过GitHub Actions验证官方initdb/volume/healthcheck语义、现有TLS与command配置、sub2api/pgAdmin连接、真实OAuth登录、`system_user`identity、ACL/RLS和rollback。Consumer evidence SHALL绑定mtmpg source、manifest、OCI digest和gomtmui source。
 
-#### Scenario: Promotion尝试重新编译
-- **WHEN** stable workflow 尝试运行 Cargo、Docker rebuild 或使用另一个 image digest生成 Release asset
-- **THEN** 发布流程 SHALL 拒绝，必须只从已验收 candidate digest 提取和验证 bytes
+Gomtmui MUST NOT本地构建Rust module或mtmpg image，也 MUST NOT增加旧validator、认证fallback或private pull credential。
 
-#### Scenario: 尝试覆盖既有release
-- **WHEN** 相同 tag 或 version 请求上传不同 binary、manifest、evidence 或 image 内容
-- **THEN** 发布流程 SHALL 拒绝并要求新版本，而不是产生同名可变制品
+#### Scenario: Candidate通过gomtmui验收
+- **WHEN** gomtmui远端workflow对固定digest完成完整consumer E2E
+- **THEN** evidence SHALL证明运行的是manifest声明的PostgreSQL/module bytes，且没有本地Rust构建或认证fallback
 
-### Requirement: Stable发布必须晚于正式runtime与跨仓库验收
-带 prerelease module version 的 alpha/RC MAY 用于 pipeline 验证，但 MUST NOT 直接晋级为 stable。可晋级 stable candidate SHALL 来自受保护 `main` 上冻结最终 `MAJOR.MINOR.PATCH` 的精确 commit，从该 commit 只构建一次并先只发布 source identity 与 OCI digest。首个 stable SHALL 要求 production feature、真实 PG18 OAuth allow/deny、role/identity、无 gate artifact、依赖/许可证/secret、SBOM/provenance、gomtmui 对同一 source/manifest/digest 的 E2E 和 rollback 全部通过。验收期间 `main` MAY 继续前进；stable tag SHALL 精确指向 candidate commit并证明它仍属于 `main` ancestry。SemVer/`latest` 与 immutable Release MUST 只引用已经验证的同一 OCI digest。
+#### Scenario: Candidate不兼容现有Compose
+- **WHEN** initdb、volume、TLS、healthcheck、依赖服务或OAuth矩阵失败
+- **THEN** gomtmui SHALL保持上一已验证image，mtmpg SHALL通过新main commit发布新candidate，不得修改旧digest
 
-#### Scenario: Alpha或RC完成pipeline验证
-- **WHEN** prerelease module version 的 artifact 通过自身门禁
-- **THEN** 它 MAY 发布对应 prerelease identity，但 MUST NOT 被重新标记为 stable、更新 `latest` 或作为最终版本 digest晋级
+### Requirement: Stable发布必须复用已验收candidate
+Stable promotion SHALL只为通过mtmpg gates与gomtmui E2E/rollback的同一OCI digest增加SemVer/`latest` alias，并创建精确source tag和immutable GitHub Release。Promotion MUST NOT运行Cargo或Docker build，也 MUST NOT覆盖既有tag、manifest、asset或image内容。
 
-#### Scenario: 最终版本candidate进入跨仓库验收
-- **WHEN** 最终 module version 已通过普通 PR 进入 `main`
-- **THEN** trusted workflow SHALL 从该精确 main commit只构建一次，并只发布 source-discovery identity、OCI digest、manifest、SBOM 与 attestation供 gomtmui验收
+#### Scenario: 晋级首个stable
+- **WHEN** native、supply-chain、consumer与rollback证据全部绑定同一candidate digest
+- **THEN** promotion SHALL发布同一digest及其manifest、SBOM、provenance、checksums和consumer evidence
 
-#### Scenario: 验收期间main继续前进
-- **WHEN** candidate E2E 进行期间后续普通 PR 已进入 `main`
-- **THEN** candidate MAY 继续晋级，只要其 source commit仍是 `main` 未改写祖先、全部证据仍精确绑定该source/digest且没有重建
-
-#### Scenario: Stable门禁全部通过
-- **WHEN** mtmpg native/cold 矩阵与 gomtmui consumer evidence 都引用同一 source、manifest 和 OCI digest并成功
-- **THEN** promotion SHALL 为同一 digest增加 stable version/`latest` alias，创建指向 candidate source commit 的 tag 与 immutable Release，且不得重新构建
-
-### Requirement: 安装、轮换与rollback必须以不可变image为单位
-容器环境 SHALL 通过切换完整 OCI digest并滚动重建 PostgreSQL backend 安装或升级 pggomtm，JWKS/config SHALL 作为运行时只读 mount 独立轮换。系统 MUST NOT 热覆盖已加载 `.so`、在目标主机现场编译或把 release bundle持久化进 gomtmui源码。Rollback SHALL 切回上一已验证 digest，不得恢复第二份源码或认证 fallback。
-
-#### Scenario: Candidate升级module
-- **WHEN** 新 candidate通过 manifest与candidate smoke
-- **THEN** 平台 SHALL 拉取固定 digest、重建服务并验证实际 server/module/OAuth身份后再完成切换
-
-#### Scenario: 新release运行失败
-- **WHEN** loader、OAuth、identity或platform smoke在切换后失败
-- **THEN** 平台 SHALL 停止新能力并滚动切回上一已验证 digest，mtmpg SHALL 通过新版本修复前进
-
-### Requirement: 发布与部署不得泄漏secret或扩大package写权限
-仓库、Git history、workflow日志、BuildKit cache、image layer、Release asset、SBOM、provenance和manifest MUST NOT包含signing private key、API key、OAuth/database JWT、authorization code、数据库连接串、`.env`、PostgreSQL data、session或真实JWKS working copy。公开GHCR读取 MUST NOT需要部署credential；package、tag、Release与attestation写权限 SHALL只存在于受保护`main`的trusted job运行期，且MUST NOT进入Compose、image、manifest或Release。
-
-#### Scenario: 扫描发布物
-- **WHEN** trusted workflow对source、history、log、cache、image filesystem、bundle、SBOM和attestation执行泄漏扫描
-- **THEN** 任一真实敏感材料命中 SHALL 阻止发布且不得用删除日志、设为private或弱化规则绕过
-
-#### Scenario: 公开环境按digest拉取image
-- **WHEN** 部署主机读取公开 `mtmpg-postgres@sha256:<digest>`
-- **THEN** 它 SHALL 不需要private pull credential，且匿名读取能力不得授权上传、删除、改标或发布Release
-
-#### Scenario: 非受信PR尝试取得写权限
-- **WHEN** fork或普通PR修改workflow并尝试访问package、Release或attestation写权限
-- **THEN** GitHub Actions SHALL 在read-only、无secret上下文运行并拒绝任何写入
+#### Scenario: Promotion尝试重建
+- **WHEN** stable workflow运行Cargo/Docker build或产生新的module/image digest
+- **THEN** 发布 SHALL失败并要求新main commit产生新candidate重新验收
