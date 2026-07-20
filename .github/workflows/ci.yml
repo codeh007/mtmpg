@@ -396,7 +396,7 @@ jobs:
           test "$(rustc --version)" = "$(jq --raw-output '.rust.compiler' resolved-inputs.json)"
           test "$(cargo --version)" = "$(jq --raw-output '.rust.cargo' resolved-inputs.json)"
 
-      - name: Run executor RED domain gates
+      - name: Run executor domain gates
         shell: bash
         run: |
           set -euo pipefail
@@ -470,22 +470,39 @@ jobs:
           test "$(rustc --version)" = "$(jq --raw-output '.rust.compiler' resolved-inputs.json)"
           test "$(cargo --version)" = "$(jq --raw-output '.rust.cargo' resolved-inputs.json)"
 
-      - name: Stage executor integration artifacts
+          {
+            echo "RUST_IMAGE=$(jq --raw-output '.rust.builder' resolved-inputs.json)"
+            echo "POSTGRES_MINOR=$(jq --raw-output '.postgresql.minor' resolved-inputs.json)"
+          } >>"$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Verify executor integration harness
         shell: bash
         run: |
           set -euo pipefail
           shellcheck tests/*.sh executor/tests/*.sh
-          validator_root="$RUNNER_TEMP/executor-validator"
-          install -d -m 0755 "$validator_root"
-          cargo build --locked --release --lib --no-default-features --features pg18
-          install -m 0644 \
-            "$CARGO_TARGET_DIR/release/libpggomtm.so" \
-            "$validator_root/pggomtm.so"
-          executor/tests/stage-integration.sh \
-            "$validator_root" \
-            "$CARGO_TARGET_DIR/executor-integration"
 
-      - name: Run executor RED real PG18 matrix
+      - name: Stage executor integration artifacts
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./executor/Dockerfile
+          target: integration-artifacts
+          platforms: linux/amd64
+          pull: true
+          push: false
+          provenance: false
+          sbom: false
+          outputs: type=local,dest=${{ runner.temp }}/executor-integration
+          build-args: |
+            RUST_IMAGE=${{ env.RUST_IMAGE }}
+            POSTGRES_MINOR=${{ env.POSTGRES_MINOR }}
+          cache-from: type=gha,scope=mtmpg-executor-ci
+          cache-to: type=gha,mode=max,scope=mtmpg-executor-ci
+
+      - name: Run executor real PG18 matrix
         shell: bash
         run: |
           set -euo pipefail
@@ -494,4 +511,4 @@ jobs:
           PGGOMTM_POSTGRES_IMAGE="$postgres_image" \
             tests/postgres_integration.sh \
               run-executor \
-              "$CARGO_TARGET_DIR/executor-integration"
+              "$RUNNER_TEMP/executor-integration"
