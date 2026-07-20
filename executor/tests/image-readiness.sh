@@ -82,7 +82,7 @@ if ! grep --quiet 'libpq[.]so[.]5' <<<"${linkage}"; then
   fail "executor is not linked to the required libpq runtime"
 fi
 
-install -d -m 0500 "${RUNTIME_ROOT}/mount"
+install -d -m 0700 "${RUNTIME_ROOT}/mount"
 install -m 0400 \
   "${ARTIFACT_ROOT}/runtime/hmac.secret" \
   "${ARTIFACT_ROOT}/runtime/signing-key.pem" \
@@ -93,6 +93,7 @@ install -m 0444 \
   "${ARTIFACT_ROOT}/runtime/executor.crt" \
   "${RUNTIME_ROOT}/mount"
 sudo chown -R 10001:10001 "${RUNTIME_ROOT}/mount"
+sudo chmod 0500 "${RUNTIME_ROOT}/mount"
 
 SERVICE_CONTAINER="$(docker run --detach \
   --read-only \
