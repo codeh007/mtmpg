@@ -67,10 +67,12 @@ LABEL org.opencontainers.image.source="https://github.com/codeh007/mtmpg" \
 
 COPY --from=build /usr/share/keyrings/postgresql.gpg /usr/share/keyrings/postgresql.gpg
 RUN test -n "${POSTGRES_MINOR}" \
+    && apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates \
     && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
       > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates libpq5 \
+    && apt-get install --yes --no-install-recommends libpq5 \
     && case "$(dpkg-query --show --showformat='${Version}' libpq5)" in \
       "${POSTGRES_MINOR}"-*) ;; \
       *) exit 1 ;; \
