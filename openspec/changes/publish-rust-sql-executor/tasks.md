@@ -13,14 +13,14 @@
 
 ## 3. 实现HMAC、协议与issuer
 
-- [ ] 3.1 实现固定HTTPS path的body上限、HMAC canonical input、constant-time比较、30秒时窗和有界单实例nonce replay store，使对应Rust测试GREEN
-- [ ] 3.2 实现strict `DelegatedPrincipal`与单statement request/response schema、结构化bind和稳定错误类别，拒绝`statements[]`、未知字段与所有credential/claims覆盖
-- [ ] 3.3 实现executor-only ES256 key loader/zeroizing issuer、active `kid`、精确30秒contract v2 claims和credential剩余有效期门禁，只复用共享profile-role contract
+- [x] 3.1 实现固定HTTPS path的body上限、HMAC canonical input、constant-time比较、30秒时窗和有界单实例nonce replay store，使对应Rust测试GREEN
+- [x] 3.2 实现strict `DelegatedPrincipal`与单statement request/response schema、结构化bind和稳定错误类别，拒绝`statements[]`、未知字段与所有credential/claims覆盖
+- [x] 3.3 实现executor-only ES256 key loader/zeroizing issuer、active `kid`、精确30秒contract v2 claims和credential剩余有效期门禁，只复用共享profile-role contract
 
 ## 4. 实现libpq OAuth与SQL执行
 
-- [ ] 4.1 从本次PG18 `libpq-fe.h`生成最小allowlist bindings并用官方C compiler验证auth hook、request、result和cancel layout，不提交手写或固定minor bindings
-- [ ] 4.2 实现启动时唯一auth-data hook、`PQconnectStartParams`后`PGconn* -> token`原子registry、cleanup callback与全部失败路径zeroize，取得单元和并发测试GREEN
+- [x] 4.1 从本次PG18 `libpq-fe.h`生成最小allowlist bindings并用官方C compiler验证auth hook、request、result和cancel layout，不提交手写或固定minor bindings
+- [x] 4.2 实现启动时唯一auth-data hook、`PQconnectStartParams`后`PGconn* -> token`原子registry、cleanup callback与全部失败路径zeroize，取得单元和并发测试GREEN
 - [ ] 4.3 实现`postgres`/`gomtm`/同名profile/`require_auth=oauth`/`verify-full`逐请求连接、无password/SCRAM/pool/`SET ROLE` fallback，并验证不同principal并发真实`system_user`
 - [ ] 4.4 实现`PQsendQueryParams` extended protocol、结构化参数与一个顶层statement，覆盖空bind、多命令拒绝和合法CTE/`CALL`/`DO`
 - [ ] 4.5 实现service-owned read-only/confirmed-change事务、commit前缓冲、columns/rows/command tag/affected rows和SQLSTATE脱敏分类，所有失败rollback或关闭
