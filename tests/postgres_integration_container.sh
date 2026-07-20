@@ -545,7 +545,7 @@ run_executor_oauth_sql_matrix() {
   gosu postgres pg_ctl \
     --pgdata="${pgdata}" \
     --log="${postgres_log}" \
-    --options="-c listen_addresses='*' -c ssl=on -c log_min_messages=log -c oauth_validator_libraries=pggomtm" \
+    --options="-c listen_addresses='*' -k /tmp -c ssl=on -c log_min_messages=log -c oauth_validator_libraries=pggomtm" \
     --wait start >/dev/null
   psql_file "${ARTIFACT_ROOT}/executor_postgres_setup.sql"
 
