@@ -44,7 +44,9 @@ fn generate_bindings() -> BuildResult<()> {
         .detect_include_paths(false)
         .clang_arg(format!("-I{include_dir}"))
         .allowlist_function("^PQlibVersion$")
-        .allowlist_type("^(PGauthData|PGoauthBearerRequest|PQauthDataHook_type)$")
+        .allowlist_type(
+            "^(PGauthData|PGconn|PGoauthBearerRequest|PostgresPollingStatusType|PQauthDataHook_type)$",
+        )
         .allowlist_var("^PQAUTHDATA_.*$")
         .allowlist_recursively(false)
         .generate_comments(false)
