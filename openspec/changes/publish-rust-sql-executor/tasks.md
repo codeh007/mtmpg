@@ -1,8 +1,8 @@
 ## 1. 固化双产品仓库边界
 
-- [ ] 1.1 更新`AGENTS.md`、README与维护文档，明确一个workspace、根validator package、唯一`executor/` package、独立image/tag/version及消费者不构建边界
-- [ ] 1.2 将根Cargo package改为只含`executor/` member的workspace，建立executor `0.1.0` manifest与只读目录骨架，确保HTTP/libpq依赖不进入validator feature
-- [ ] 1.3 从validator抽取pgrx无关的database-token profile/role/claims contract并由两个package复用，使用既有validator测试证明contract v2行为不变且不复制mapping/decoder
+- [x] 1.1 更新`AGENTS.md`、README与维护文档，明确一个workspace、根validator package、唯一`executor/` package、独立image/tag/version及消费者不构建边界
+- [x] 1.2 将根Cargo package改为只含`executor/` member的workspace，建立executor `0.1.0` manifest与只读目录骨架，确保HTTP/libpq依赖不进入validator feature
+- [x] 1.3 从validator抽取pgrx无关的database-token profile/role/claims contract并由两个package复用，使用既有validator测试证明contract v2行为不变且不复制mapping/decoder
 
 ## 2. 建立有效RED证据
 
