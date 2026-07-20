@@ -77,12 +77,8 @@ impl DatabaseTokenIssuer {
         }
 
         let (client_id, credential_id) = match principal.auth_method {
-            pggomtm::database_auth::AuthMethod::OAuth => {
-                (principal.client_id.clone(), None)
-            }
-            pggomtm::database_auth::AuthMethod::ApiKey => {
-                (None, principal.credential_id.clone())
-            }
+            pggomtm::database_auth::AuthMethod::OAuth => (principal.client_id.clone(), None),
+            pggomtm::database_auth::AuthMethod::ApiKey => (None, principal.credential_id.clone()),
         };
         let claims = DatabaseTokenClaims {
             issuer: self.config.issuer.clone(),

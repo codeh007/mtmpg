@@ -46,11 +46,7 @@ impl HmacAuthenticator {
         })
     }
 
-    pub fn verify(
-        &self,
-        request: &SignedRequest<'_>,
-        now: i64,
-    ) -> Result<(), AuthenticationError> {
+    pub fn verify(&self, request: &SignedRequest<'_>, now: i64) -> Result<(), AuthenticationError> {
         if request.method != "POST"
             || request.path != EXECUTE_PATH
             || request.version != WIRE_VERSION
@@ -61,8 +57,8 @@ impl HmacAuthenticator {
             return Err(AuthenticationError::Unauthorized);
         }
 
-        let signature = decode_signature(request.signature)
-            .ok_or(AuthenticationError::Unauthorized)?;
+        let signature =
+            decode_signature(request.signature).ok_or(AuthenticationError::Unauthorized)?;
         let body_digest = Sha256::digest(request.body);
         let canonical = format!(
             "{}\n{}\n{}\n{}\n{}\n{body_digest:x}",
