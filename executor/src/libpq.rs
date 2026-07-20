@@ -627,7 +627,7 @@ impl ResultOwner {
             let row_index = c_int::try_from(row)
                 .map_err(|_| DatabaseError::new(DatabaseErrorKind::Unavailable))?;
             let mut values = Vec::with_capacity(column_count);
-            for column in 0..column_count {
+            for (column, column_schema) in columns.iter().enumerate() {
                 let column_index = c_int::try_from(column)
                     .map_err(|_| DatabaseError::new(DatabaseErrorKind::Unavailable))?;
                 // SAFETY: both indexes are inside the result bounds.
@@ -655,7 +655,7 @@ impl ResultOwner {
                 let bytes = unsafe { std::slice::from_raw_parts(pointer.cast::<u8>(), length) };
                 let text = std::str::from_utf8(bytes)
                     .map_err(|_| DatabaseError::new(DatabaseErrorKind::Unavailable))?;
-                let value = match columns[column].type_oid {
+                let value = match column_schema.type_oid {
                     JSON_OID | JSONB_OID => serde_json::from_str(text)
                         .map_err(|_| DatabaseError::new(DatabaseErrorKind::Unavailable))?,
                     _ => Value::String(text.to_owned()),
@@ -686,9 +686,7 @@ impl ResultOwner {
 
     fn sqlstate_class(&self) -> Option<String> {
         // SAFETY: self owns a live result; NULL indicates no SQLSTATE.
-        let field = unsafe {
-            ffi::PQresultErrorField(self.0, c_int::try_from(ffi::PG_DIAG_SQLSTATE).ok()?)
-        };
+        let field = unsafe { ffi::PQresultErrorField(self.0, c_int::from(ffi::PG_DIAG_SQLSTATE)) };
         if field.is_null() {
             return None;
         }
