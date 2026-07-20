@@ -300,12 +300,13 @@ pub fn execute(
     connection
         .control("SET LOCAL lock_timeout = '250ms'", deadline, cancellation)
         .map_err(|error| error.at_stage(DatabaseStage::LockBudget))?;
-    connection.control(
-        "SET LOCAL statement_timeout = '750ms'",
-        deadline,
-        cancellation,
-    )
-    .map_err(|error| error.at_stage(DatabaseStage::StatementBudget))?;
+    connection
+        .control(
+            "SET LOCAL statement_timeout = '750ms'",
+            deadline,
+            cancellation,
+        )
+        .map_err(|error| error.at_stage(DatabaseStage::StatementBudget))?;
     connection
         .control(
             "SET LOCAL idle_in_transaction_session_timeout = '1500ms'",
@@ -338,10 +339,9 @@ pub fn execute(
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         correlation_id: request.correlation_id.clone(),
     };
-    let encoded = serde_json::to_vec(&result)
-        .map_err(|_| {
-            DatabaseError::new(DatabaseErrorKind::Unavailable).at_stage(DatabaseStage::Result)
-        })?;
+    let encoded = serde_json::to_vec(&result).map_err(|_| {
+        DatabaseError::new(DatabaseErrorKind::Unavailable).at_stage(DatabaseStage::Result)
+    })?;
     if encoded.len() > MAX_RESULT_BYTES {
         connection.rollback_best_effort();
         return Err(
