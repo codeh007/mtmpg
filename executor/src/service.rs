@@ -49,61 +49,85 @@ struct RuntimeConfig {
 
 impl RuntimeConfig {
     fn from_environment() -> Result<Self, Box<dyn Error>> {
-        let hmac_secret = Zeroizing::new(fs::read(required_environment(
-            "MTMPG_EXECUTOR_HMAC_SECRET_PATH",
-        )?)?);
-        let authenticator = HmacAuthenticator::new(hmac_secret.to_vec(), REPLAY_CAPACITY)
-            .map_err(|_| invalid_input("invalid HMAC configuration"))?;
+        let hmac_path = startup_stage(
+            required_environment("MTMPG_EXECUTOR_HMAC_SECRET_PATH"),
+            "hmac",
+        )?;
+        let hmac_secret = Zeroizing::new(startup_stage(fs::read(hmac_path), "hmac")?);
+        let authenticator = startup_stage(
+            HmacAuthenticator::new(hmac_secret.to_vec(), REPLAY_CAPACITY),
+            "hmac",
+        )?;
 
-        let signing_pem = Zeroizing::new(fs::read_to_string(required_environment(
-            "MTMPG_EXECUTOR_SIGNING_KEY_PATH",
-        )?)?);
-        let signing_key = SigningKey::from_pkcs8_pem(&signing_pem)
-            .map_err(|_| invalid_input("invalid signing key"))?;
-        let issuer_config = IssuerConfig::new(
-            required_environment("MTMPG_EXECUTOR_ISSUER")?,
-            required_environment("MTMPG_EXECUTOR_AUDIENCE")?,
-            required_environment("MTMPG_EXECUTOR_KEY_ID")?,
-        )
-        .map_err(|_| invalid_input("invalid issuer configuration"))?;
+        let signing_key_path = startup_stage(
+            required_environment("MTMPG_EXECUTOR_SIGNING_KEY_PATH"),
+            "signing_key",
+        )?;
+        let signing_pem = Zeroizing::new(startup_stage(
+            fs::read_to_string(signing_key_path),
+            "signing_key",
+        )?);
+        let signing_key = startup_stage(SigningKey::from_pkcs8_pem(&signing_pem), "signing_key")?;
+        let issuer = startup_stage(required_environment("MTMPG_EXECUTOR_ISSUER"), "issuer")?;
+        let audience = startup_stage(required_environment("MTMPG_EXECUTOR_AUDIENCE"), "issuer")?;
+        let key_id = startup_stage(required_environment("MTMPG_EXECUTOR_KEY_ID"), "issuer")?;
+        let issuer_config = startup_stage(IssuerConfig::new(issuer, audience, key_id), "issuer")?;
 
-        let registry = Arc::new(
-            ConnectionTokenRegistry::with_capacity(MAX_CONCURRENCY)
-                .map_err(|_| invalid_input("invalid token registry configuration"))?,
-        );
-        install_auth_data_hook(Arc::clone(&registry))
-            .map_err(|_| invalid_input("libpq auth hook installation failed"))?;
+        let registry = Arc::new(startup_stage(
+            ConnectionTokenRegistry::with_capacity(MAX_CONCURRENCY),
+            "token_registry",
+        )?);
+        startup_stage(install_auth_data_hook(Arc::clone(&registry)), "libpq")?;
+
+        let ca_path = startup_stage(
+            required_environment("MTMPG_EXECUTOR_POSTGRES_CA_PATH"),
+            "database_tls",
+        )?;
+        let listen = startup_stage(
+            startup_stage(required_environment("MTMPG_EXECUTOR_LISTEN"), "listen")?.parse(),
+            "listen",
+        )?;
+        let tls_cert_path = startup_stage(
+            required_environment("MTMPG_EXECUTOR_TLS_CERT_PATH"),
+            "https_tls",
+        )?;
+        let tls_key_path = startup_stage(
+            required_environment("MTMPG_EXECUTOR_TLS_KEY_PATH"),
+            "https_tls",
+        )?;
 
         Ok(Self {
             state: AppState {
                 authenticator: Arc::new(authenticator),
                 issuer: Arc::new(DatabaseTokenIssuer::new(issuer_config, signing_key)),
-                database: DatabaseConfig::canonical(required_environment(
-                    "MTMPG_EXECUTOR_POSTGRES_CA_PATH",
-                )?),
+                database: DatabaseConfig::canonical(ca_path),
                 registry,
                 concurrency: Arc::new(Semaphore::new(MAX_CONCURRENCY)),
             },
-            listen: required_environment("MTMPG_EXECUTOR_LISTEN")?
-                .parse()
-                .map_err(|_| invalid_input("invalid listen address"))?,
-            tls_cert_path: required_environment("MTMPG_EXECUTOR_TLS_CERT_PATH")?,
-            tls_key_path: required_environment("MTMPG_EXECUTOR_TLS_KEY_PATH")?,
+            listen,
+            tls_cert_path,
+            tls_key_path,
         })
     }
 }
 
 pub async fn run() -> Result<(), Box<dyn Error>> {
     let config = RuntimeConfig::from_environment()?;
-    let tls = RustlsConfig::from_pem_file(&config.tls_cert_path, &config.tls_key_path).await?;
+    let tls = startup_stage(
+        RustlsConfig::from_pem_file(&config.tls_cert_path, &config.tls_key_path).await,
+        "https_tls",
+    )?;
     let application = Router::new()
         .route("/ready", get(ready))
         .route(crate::auth::EXECUTE_PATH, post(execute))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .with_state(config.state);
-    axum_server::bind_rustls(config.listen, tls)
-        .serve(application.into_make_service())
-        .await?;
+    startup_stage(
+        axum_server::bind_rustls(config.listen, tls)
+            .serve(application.into_make_service())
+            .await,
+        "https_server",
+    )?;
     Ok(())
 }
 
@@ -304,4 +328,11 @@ fn unix_time() -> Result<i64, ()> {
 
 fn invalid_input(message: &'static str) -> IoError {
     IoError::new(ErrorKind::InvalidInput, message)
+}
+
+fn startup_stage<T, E>(result: Result<T, E>, stage: &'static str) -> Result<T, Box<dyn Error>> {
+    result.map_err(|_| {
+        eprintln!("executor startup failed: {stage}");
+        Box::new(invalid_input("executor startup failed")) as Box<dyn Error>
+    })
 }

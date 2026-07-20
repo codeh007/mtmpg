@@ -564,8 +564,24 @@ run_executor_oauth_sql_matrix() {
   EXECUTOR_PID=$!
 
   sleep 1
-  kill -0 "${EXECUTOR_PID}" >/dev/null 2>&1 || \
+  if ! kill -0 "${EXECUTOR_PID}" >/dev/null 2>&1; then
+    local startup_stage
+    for startup_stage in \
+      hmac \
+      signing_key \
+      issuer \
+      token_registry \
+      libpq \
+      database_tls \
+      listen \
+      https_tls \
+      https_server; do
+      if grep --quiet "^executor startup failed: ${startup_stage}$" "${executor_log}"; then
+        fail "executor service exited during ${startup_stage} startup"
+      fi
+    done
     fail "executor service exited before readiness"
+  fi
   MTMPG_EXECUTOR_CA_PATH="${runtime_root}/ca.crt" \
   MTMPG_EXECUTOR_HMAC_PATH="${runtime_root}/hmac.secret" \
   MTMPG_EXECUTOR_URL=https://executor:8443 \
