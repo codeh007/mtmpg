@@ -37,11 +37,11 @@
 - [x] 6.1 增加executor独立image定义，只包含release binary、匹配libpq runtime、CA与MIT license，以固定非root身份运行且不含toolchain/source/test/secret/PostgreSQL server
 - [x] 6.2 扩展标准CI product选择，构建一次executor OCI archive并验证非root HTTPS readiness、动态依赖、最小HMAC/OAuth allow-deny和image secret边界
 - [x] 6.3 增加`executor-v*`独立release workflow，校验annotated tag、executor Cargo version、精确SHA/main ancestry，并只推送同一CI已验证archive及manifest/checksums/SBOM/provenance/attestation
-- [ ] 6.4 保留`executor-v0.1.0`、`executor-v0.1.1`与`executor-v0.1.2`失败历史，修复draft发布顺序、draft ID解析与Release列表最终一致性轮询，并在精确main GREEN SHA创建annotated `executor-v0.1.3`，等待GitHub Actions成功发布完整image与独立Release
-- [ ] 6.5 匿名核对`0.1.3` image、source、Cargo.lock、resolved PG18/libpq、OCI digest、manifest、checksums、SBOM、provenance和attestation，并证明`mtmpg:v0.2.0` tag/image/Release未变化
+- [x] 6.4 保留`executor-v0.1.0`、`executor-v0.1.1`与`executor-v0.1.2`失败历史，修复draft发布顺序、draft ID解析与Release列表最终一致性轮询，并在精确main GREEN SHA创建annotated `executor-v0.1.3`，等待GitHub Actions成功发布完整image与独立Release
+- [x] 6.5 匿名核对`0.1.3` image、source、Cargo.lock、resolved PG18/libpq、OCI digest、manifest、checksums、SBOM、provenance和attestation，并证明`mtmpg:v0.2.0` tag/image/Release未变化
 
 ## 7. 完成交付证据
 
 - [x] 7.1 更新README与executor运行/失败/兼容文档，记录固定wire、mount、TLS、单实例nonce与无fallback边界，不包含真实credential或连接串
-- [ ] 7.2 运行`openspec validate publish-rust-sql-executor --strict`、secret扫描和Git diff检查，回填精确RED/GREEN/release run、source、image digest与脱敏真实PG18证据
+- [x] 7.2 运行`openspec validate publish-rust-sql-executor --strict`、secret扫描和Git diff检查，回填精确RED/GREEN/release run、source、image digest与脱敏真实PG18证据
 - [ ] 7.3 将已发布executor identity交给gomtmui consumer change；只有gomtmui完整activation与OAuth/API-key E2E完成后，才在Issue #126宣告原始任务完成
