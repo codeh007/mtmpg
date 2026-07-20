@@ -11,6 +11,9 @@ const CALLBACK_ABI_PATTERN: &str =
 type BuildResult<T> = Result<T, Box<dyn Error>>;
 
 fn main() {
+    if env::var_os("CARGO_FEATURE_PG18").is_none() {
+        return;
+    }
     println!("cargo:rerun-if-env-changed=PGRX_PG_CONFIG_PATH");
     if let Err(error) = generate_bindings() {
         panic!("failed to generate PostgreSQL OAuth ABI bindings: {error}");

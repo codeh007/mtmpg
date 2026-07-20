@@ -1,0 +1,9 @@
+[package]
+name = "mtmpg-executor"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+pggomtm = { path = "..", default-features = false, features = ["database-token-contract"] }

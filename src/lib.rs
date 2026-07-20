@@ -1,49 +1,66 @@
-#[cfg(any(feature = "abi-runtime-gate", feature = "pgx-oauth-gate"))]
+#[cfg(all(feature = "pg18", any(feature = "abi-runtime-gate", feature = "pgx-oauth-gate")))]
 use std::ffi::CStr;
-#[cfg(feature = "pgx-oauth-gate")]
+#[cfg(all(feature = "pg18", feature = "pgx-oauth-gate"))]
 use std::ffi::CString;
-#[cfg(not(any(
-    feature = "abi-gate",
-    feature = "abi-runtime-gate",
-    feature = "pgx-oauth-gate"
-)))]
+#[cfg(all(
+    feature = "pg18",
+    not(any(
+        feature = "abi-gate",
+        feature = "abi-runtime-gate",
+        feature = "pgx-oauth-gate"
+    ))
+))]
 use std::ffi::{CStr, CString};
+#[cfg(feature = "pg18")]
 use std::ffi::{c_char, c_void};
+#[cfg(feature = "pg18")]
 use std::panic::{AssertUnwindSafe, catch_unwind};
+#[cfg(feature = "pg18")]
 use std::ptr;
 
+#[cfg(feature = "pg18")]
 use auth_failure::AuthenticationFailureReason;
-#[cfg(not(any(
-    feature = "abi-gate",
-    feature = "abi-runtime-gate",
-    feature = "pgx-oauth-gate"
-)))]
+#[cfg(all(
+    feature = "pg18",
+    not(any(
+        feature = "abi-gate",
+        feature = "abi-runtime-gate",
+        feature = "pgx-oauth-gate"
+    ))
+))]
 use runtime_config::{ValidatorSnapshot, load_validator_snapshot};
 
+#[cfg(feature = "pg18")]
 pgrx::pg_module_magic!();
 
+#[cfg(feature = "database-token-contract")]
 pub mod auth_failure;
+#[cfg(feature = "database-token-contract")]
 pub mod database_auth;
+#[cfg(feature = "pg18")]
 pub mod oauth_abi;
+#[cfg(feature = "pg18")]
 pub mod runtime_config;
 
+#[cfg(feature = "pg18")]
 pub use oauth_abi::{
     OAuthValidatorCallbacks, OAuthValidatorModuleInit, PG_OAUTH_VALIDATOR_MAGIC,
     ValidatorModuleResult, ValidatorModuleState, ValidatorShutdownCB, ValidatorStartupCB,
     ValidatorValidateCB,
 };
 
+#[cfg(feature = "pg18")]
 pub const PG18_VERSION_NUM: i32 = 180_000;
 
-#[cfg(feature = "abi-runtime-gate")]
+#[cfg(all(feature = "pg18", feature = "abi-runtime-gate"))]
 const ABI_RUNTIME_PANIC_SENTINEL: usize = 1;
-#[cfg(feature = "abi-runtime-gate")]
+#[cfg(all(feature = "pg18", feature = "abi-runtime-gate"))]
 const ABI_RUNTIME_ERROR_SENTINEL: usize = 2;
 
-#[cfg(feature = "pgx-oauth-gate")]
+#[cfg(all(feature = "pg18", feature = "pgx-oauth-gate"))]
 const PGX_OAUTH_GATE_JWKS: &str = r#"{"keys":[{"kty":"EC","crv":"P-256","alg":"ES256","use":"sig","key_ops":["verify"],"kid":"candidate-es256-pgx-gate","x":"HhhTL9R1TALzBB2cdc6zO4P_2BrHzk_ogsyxyYvFiW4","y":"pGwxHE4v9A3ZajZT5uRURdMt_khuztdcepDGoYiBwKM"}]}"#;
 
-#[cfg(feature = "pgx-oauth-gate")]
+#[cfg(all(feature = "pg18", feature = "pgx-oauth-gate"))]
 fn verify_pgx_gate_token(
     token: &str,
     requested_role: &str,
@@ -57,6 +74,7 @@ fn verify_pgx_gate_token(
     Ok(verifier.verify(token, requested_role, now)?.authn_id)
 }
 
+#[cfg(feature = "pg18")]
 static OAUTH_CALLBACKS: OAuthValidatorCallbacks = OAuthValidatorCallbacks {
     magic: PG_OAUTH_VALIDATOR_MAGIC,
     startup_cb: Some(validator_startup),
@@ -65,15 +83,18 @@ static OAUTH_CALLBACKS: OAuthValidatorCallbacks = OAuthValidatorCallbacks {
 };
 
 #[must_use]
+#[cfg(feature = "pg18")]
 pub const fn server_version_is_supported(server_version: i32) -> bool {
     server_version / 10_000 == 18
 }
 
 #[must_use]
+#[cfg(feature = "pg18")]
 pub fn oauth_callbacks() -> &'static OAuthValidatorCallbacks {
     &OAUTH_CALLBACKS
 }
 
+#[cfg(feature = "pg18")]
 #[cfg_attr(not(feature = "abi-gate"), pgrx::pg_guard)]
 unsafe extern "C-unwind" fn validator_startup(state: *mut ValidatorModuleState) {
     if state.is_null() {
@@ -132,6 +153,7 @@ unsafe extern "C-unwind" fn validator_startup(state: *mut ValidatorModuleState) 
     }
 }
 
+#[cfg(feature = "pg18")]
 #[cfg_attr(not(feature = "abi-gate"), pgrx::pg_guard)]
 unsafe extern "C-unwind" fn validator_shutdown(state: *mut ValidatorModuleState) {
     if let Some(state) = unsafe { state.as_mut() } {
@@ -169,6 +191,7 @@ unsafe extern "C-unwind" fn validator_shutdown(state: *mut ValidatorModuleState)
     }
 }
 
+#[cfg(feature = "pg18")]
 #[cfg_attr(not(feature = "abi-gate"), pgrx::pg_guard)]
 unsafe extern "C-unwind" fn validate_token(
     state: *const ValidatorModuleState,
@@ -323,33 +346,35 @@ unsafe extern "C-unwind" fn validate_token(
     }
 }
 
-#[cfg(feature = "abi-gate")]
+#[cfg(all(feature = "pg18", feature = "abi-gate"))]
 fn log_authentication_rejection(_reason: AuthenticationFailureReason) {}
 
-#[cfg(not(feature = "abi-gate"))]
+#[cfg(all(feature = "pg18", not(feature = "abi-gate")))]
 fn log_authentication_rejection(reason: AuthenticationFailureReason) {
     pgrx::log!("pggomtm authentication rejected: reason={reason}");
 }
 
-#[cfg(not(feature = "abi-gate"))]
+#[cfg(all(feature = "pg18", not(feature = "abi-gate")))]
 fn raise_authentication_error(reason: AuthenticationFailureReason) -> ! {
     pgrx::error!("pggomtm authentication failed: reason={reason}");
 }
 
-#[cfg(feature = "abi-gate")]
+#[cfg(all(feature = "pg18", feature = "abi-gate"))]
 fn raise_authentication_error(reason: AuthenticationFailureReason) -> ! {
     panic!("pggomtm authentication failed: reason={reason}");
 }
 
+#[cfg(feature = "pg18")]
 #[cfg_attr(not(feature = "abi-gate"), pgrx::pg_guard)]
 #[unsafe(no_mangle)]
 pub extern "C-unwind" fn _PG_oauth_validator_module_init() -> *const OAuthValidatorCallbacks {
     oauth_callbacks() as *const OAuthValidatorCallbacks
 }
 
+#[cfg(feature = "pg18")]
 const _: OAuthValidatorModuleInit = Some(_PG_oauth_validator_module_init);
 
-#[cfg(feature = "abi-gate")]
+#[cfg(all(feature = "pg18", feature = "abi-gate"))]
 #[must_use]
 pub fn panic_boundary_for_gate() -> bool {
     catch_unwind(AssertUnwindSafe(|| panic!("pggomtm ABI panic gate"))).is_ok()
