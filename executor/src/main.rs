@@ -1,4 +1,7 @@
-fn main() {
-    eprintln!("executor production service is not implemented");
-    std::process::exit(78);
+#[tokio::main]
+async fn main() {
+    if mtmpg_executor::service::run().await.is_err() {
+        eprintln!("executor failed to start or stopped unexpectedly");
+        std::process::exit(78);
+    }
 }

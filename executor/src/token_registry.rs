@@ -49,6 +49,14 @@ impl ConnectionTokenRegistry {
         connection: ConnectionId,
         token: String,
     ) -> Result<(), TokenRegistryError> {
+        self.register_secret(connection, Zeroizing::new(token))
+    }
+
+    pub(crate) fn register_secret(
+        &self,
+        connection: ConnectionId,
+        token: Zeroizing<String>,
+    ) -> Result<(), TokenRegistryError> {
         if token.is_empty() || token.as_bytes().contains(&0) {
             return Err(TokenRegistryError::InvalidToken);
         }
@@ -62,7 +70,7 @@ impl ConnectionTokenRegistry {
         if tokens.len() >= self.capacity {
             return Err(TokenRegistryError::CapacityExceeded);
         }
-        tokens.insert(connection, Zeroizing::new(token));
+        tokens.insert(connection, token);
         Ok(())
     }
 
@@ -109,6 +117,10 @@ impl ClaimedToken {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    pub(crate) fn into_secret(self) -> Zeroizing<String> {
+        self.0
     }
 }
 

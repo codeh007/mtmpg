@@ -5,6 +5,19 @@ use std::process::Command;
 
 const POSTGRES_MAJOR: u32 = 18;
 const BINDINGS_FILE: &str = "mtmpg_executor_libpq_bindings.rs";
+const LIBPQ_FUNCTIONS: &str = concat!(
+    "^(PQcancelBlocking|PQcancelCreate|PQcancelFinish|PQclear|PQcmdStatus|PQcmdTuples|",
+    "PQconnectPoll|PQconnectStartParams|PQconsumeInput|PQerrorMessage|PQfinish|PQflush|",
+    "PQfname|PQftype|PQgetCurrentTimeUSec|PQgetResult|PQgetisnull|PQgetlength|PQgetvalue|",
+    "PQisBusy|PQlibVersion|PQnfields|PQntuples|PQresultErrorField|PQresultStatus|",
+    "PQsendQueryParams|PQsetAuthDataHook|PQsetErrorContextVisibility|PQsetErrorVerbosity|",
+    "PQsetnonblocking|PQsetNoticeProcessor|PQsocket|PQsocketPoll|PQtransactionStatus)$"
+);
+const LIBPQ_TYPES: &str = concat!(
+    "^(ConnStatusType|ExecStatusType|Oid|PGauthData|PGcancelConn|PGconn|PGContextVisibility|",
+    "PGoauthBearerRequest|PGresult|PGTransactionStatusType|PGVerbosity|PostgresPollingStatusType|",
+    "PQauthDataHook_type|PQnoticeProcessor|pg_cancel_conn|pg_conn|pg_result|pg_usec_time_t)$"
+);
 
 type BuildResult<T> = Result<T, Box<dyn Error>>;
 
@@ -43,11 +56,14 @@ fn generate_bindings() -> BuildResult<()> {
         .header(header)
         .detect_include_paths(false)
         .clang_arg(format!("-I{include_dir}"))
-        .allowlist_function("^PQlibVersion$")
-        .allowlist_type(
-            "^(PGauthData|PGconn|PGoauthBearerRequest|PostgresPollingStatusType|PQauthDataHook_type)$",
+        .allowlist_function(LIBPQ_FUNCTIONS)
+        .allowlist_type(LIBPQ_TYPES)
+        .allowlist_var(
+            concat!(
+                "^(CONNECTION_|PGRES_|PG_DIAG_SQLSTATE$|PQAUTHDATA_|PQERRORS_|",
+                "PQSHOW_CONTEXT_|PQTRANS_).*$"
+            ),
         )
-        .allowlist_var("^PQAUTHDATA_.*$")
         .allowlist_recursively(false)
         .generate_comments(false)
         .layout_tests(false)

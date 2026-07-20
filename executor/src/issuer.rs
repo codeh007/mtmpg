@@ -115,6 +115,10 @@ impl IssuedDatabaseToken {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    pub(crate) fn into_secret(self) -> Zeroizing<String> {
+        self.0
+    }
 }
 
 impl fmt::Debug for IssuedDatabaseToken {
