@@ -1,5 +1,9 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::num::NonZeroUsize;
+use std::sync::Mutex;
+
+use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ConnectionId(NonZeroUsize);
@@ -20,10 +24,13 @@ pub enum TokenRegistryError {
     DuplicateConnection,
     UnknownConnection,
     CapacityExceeded,
+    InvalidToken,
+    Unavailable,
 }
 
 pub struct ConnectionTokenRegistry {
-    _capacity: usize,
+    capacity: usize,
+    tokens: Mutex<HashMap<ConnectionId, Zeroizing<String>>>,
 }
 
 impl ConnectionTokenRegistry {
@@ -32,29 +39,53 @@ impl ConnectionTokenRegistry {
             return Err(TokenRegistryError::InvalidCapacity);
         }
         Ok(Self {
-            _capacity: capacity,
+            capacity,
+            tokens: Mutex::new(HashMap::with_capacity(capacity)),
         })
     }
 
     pub fn register(
         &self,
-        _connection: ConnectionId,
-        _token: String,
+        connection: ConnectionId,
+        token: String,
     ) -> Result<(), TokenRegistryError> {
-        todo!("per-connection token registration is implemented after RED verification")
+        if token.is_empty() || token.as_bytes().contains(&0) {
+            return Err(TokenRegistryError::InvalidToken);
+        }
+        let mut tokens = self
+            .tokens
+            .lock()
+            .map_err(|_| TokenRegistryError::Unavailable)?;
+        if tokens.contains_key(&connection) {
+            return Err(TokenRegistryError::DuplicateConnection);
+        }
+        if tokens.len() >= self.capacity {
+            return Err(TokenRegistryError::CapacityExceeded);
+        }
+        tokens.insert(connection, Zeroizing::new(token));
+        Ok(())
     }
 
-    pub fn claim(&self, _connection: ConnectionId) -> Result<ClaimedToken, TokenRegistryError> {
-        todo!("one-time token claiming is implemented after RED verification")
+    pub fn claim(&self, connection: ConnectionId) -> Result<ClaimedToken, TokenRegistryError> {
+        let mut tokens = self
+            .tokens
+            .lock()
+            .map_err(|_| TokenRegistryError::Unavailable)?;
+        tokens
+            .remove(&connection)
+            .map(ClaimedToken)
+            .ok_or(TokenRegistryError::UnknownConnection)
     }
 
-    pub fn cleanup(&self, _connection: ConnectionId) -> bool {
-        todo!("failure cleanup is implemented after RED verification")
+    pub fn cleanup(&self, connection: ConnectionId) -> bool {
+        self.tokens
+            .lock()
+            .is_ok_and(|mut tokens| tokens.remove(&connection).is_some())
     }
 
     #[must_use]
     pub fn len(&self) -> usize {
-        todo!("registry accounting is implemented after RED verification")
+        self.tokens.lock().map_or(usize::MAX, |tokens| tokens.len())
     }
 
     #[must_use]
@@ -72,7 +103,7 @@ impl fmt::Debug for ConnectionTokenRegistry {
 }
 
 #[derive(PartialEq, Eq)]
-pub struct ClaimedToken(String);
+pub struct ClaimedToken(Zeroizing<String>);
 
 impl ClaimedToken {
     #[must_use]

@@ -38,6 +38,20 @@ impl DelegatedPrincipal {
             .or(self.credential_id.as_deref())
             .unwrap_or("")
     }
+
+    pub(crate) fn is_valid(&self) -> bool {
+        let actor_matches = matches!(
+            (self.auth_method, &self.client_id, &self.credential_id),
+            (AuthMethod::OAuth, Some(_), None) | (AuthMethod::ApiKey, None, Some(_))
+        );
+        actor_matches
+            && is_internal_id(&self.user_id)
+            && is_internal_id(self.actor_id())
+            && is_internal_id(&self.delegation_id)
+            && self.authority_version > 0
+            && self.database_scope == "database"
+            && self.credential_expires_at > 0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -73,6 +87,56 @@ pub struct ExecuteRequest {
     pub correlation_id: String,
 }
 
-pub fn parse_execute_request(_body: &[u8]) -> Result<ExecuteRequest, ProtocolError> {
-    todo!("strict request parsing is implemented after RED verification")
+pub fn parse_execute_request(body: &[u8]) -> Result<ExecuteRequest, ProtocolError> {
+    if body.len() > MAX_REQUEST_BODY_BYTES {
+        return Err(ProtocolError::LimitExceeded);
+    }
+
+    let request: ExecuteRequest =
+        serde_json::from_slice(body).map_err(|_| ProtocolError::InvalidRequest)?;
+    if !request.principal.is_valid()
+        || request.statement.trim().is_empty()
+        || !is_correlation_id(&request.correlation_id)
+    {
+        return Err(ProtocolError::InvalidRequest);
+    }
+    if request.statement.len() > MAX_STATEMENT_BYTES
+        || request.binds.len() > MAX_BIND_COUNT
+        || request.binds.iter().any(bind_exceeds_limit)
+    {
+        return Err(ProtocolError::LimitExceeded);
+    }
+
+    match (request.intent, request.change_confirmed) {
+        (ExecutionIntent::Read, false) | (ExecutionIntent::Change, true) => Ok(request),
+        (ExecutionIntent::Change, false) => Err(ProtocolError::ConfirmationRequired),
+        (ExecutionIntent::Read, true) => Err(ProtocolError::InvalidRequest),
+    }
+}
+
+fn bind_exceeds_limit(bind: &BindValue) -> bool {
+    match bind {
+        BindValue::Null | BindValue::Int64(_) | BindValue::Boolean(_) => false,
+        BindValue::Text(value) => value.len() > MAX_BIND_VALUE_BYTES,
+        BindValue::Json(value) => match serde_json::to_vec(value) {
+            Ok(encoded) => encoded.len() > MAX_BIND_VALUE_BYTES,
+            Err(_) => true,
+        },
+    }
+}
+
+fn is_internal_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn is_correlation_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
