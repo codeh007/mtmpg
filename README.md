@@ -15,6 +15,7 @@
 详细运行契约见：
 
 - [Runtime 配置](docs/runtime-configuration.md)
+- [SQL executor 运行契约](docs/executor-runtime.md)
 - [认证失败可见性](docs/authentication-failures.md)
 - [发布与兼容](docs/release-and-compatibility.md)
 
@@ -45,9 +46,9 @@ mtmpg 使用 SemVer 作为用户可见身份：
 
 - Validator prerelease/stable：`ghcr.io/codeh007/mtmpg:<semver>`，由`v<semver>` tag发布。
 - Executor prerelease/stable：`ghcr.io/codeh007/mtmpg-executor:<semver>`，由`executor-v<semver>` tag发布。
-- 两个product的`latest`只在各自完整stable release成功后更新；消费者使用明确SemVer。
+- Validator stable成功后更新自己的`latest`；executor不发布可消费的`latest`，消费者始终使用明确SemVer。
 
-`.github/workflows/release.yml`只响应严格校验通过的 `v<semver>` tag。它调用同一 `ci.yml`，下载该 run 已验证的 OCI archive后推送一次，不在publish job中运行Cargo或Docker build。Prerelease与stable分别从自己的不可变tag完整解析、测试、构建和发布。
+`.github/workflows/release.yml`严格分派validator `v<semver>`与executor `executor-v<semver>` annotated tag。它调用同一 `ci.yml`，下载该run已验证的目标OCI archive后推送一次，不在publish job中运行Cargo或Docker build。Prerelease与stable分别从自己的不可变tag完整解析、测试、构建和发布；executor release不修改validator tag、image、Release或`latest`。
 
 每个release的长期权威是版本化公开GHCR image、GitHub Release、Cargo.lock、`resolved-inputs.json`、release manifest、checksums、SPDX SBOM、provenance与GitHub attestation。Actions artifact只用于同一次run内传递。当前stable见 [v0.2.0](https://github.com/codeh007/mtmpg/releases/tag/v0.2.0)；[v0.1.0](https://github.com/codeh007/mtmpg/releases/tag/v0.1.0)与首个prerelease [v0.1.0-rc.1](https://github.com/codeh007/mtmpg/releases/tag/v0.1.0-rc.1)作为不可变历史保留。发布进度由 [mtmpg #1](https://github.com/codeh007/mtmpg/issues/1) 和 active OpenSpec change 跟踪。
 

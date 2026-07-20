@@ -21,16 +21,16 @@
 
 - [x] 4.1 从本次PG18 `libpq-fe.h`生成最小allowlist bindings并用官方C compiler验证auth hook、request、result和cancel layout，不提交手写或固定minor bindings
 - [x] 4.2 实现启动时唯一auth-data hook、`PQconnectStartParams`后`PGconn* -> token`原子registry、cleanup callback与全部失败路径zeroize，取得单元和并发测试GREEN
-- [ ] 4.3 实现`postgres`/`gomtm`/同名profile/`require_auth=oauth`/`verify-full`逐请求连接、无password/SCRAM/pool/`SET ROLE` fallback，并验证不同principal并发真实`system_user`
-- [ ] 4.4 实现`PQsendQueryParams` extended protocol、结构化参数与一个顶层statement，覆盖空bind、多命令拒绝和合法CTE/`CALL`/`DO`
-- [ ] 4.5 实现service-owned read-only/confirmed-change事务、commit前缓冲、columns/rows/command tag/affected rows和SQLSTATE脱敏分类，所有失败rollback或关闭
-- [ ] 4.6 固化request/statement/bind/connection/lock/transaction/1000-row/1-MiB/256-KiB/deadline预算，并由connection owner传播cancel且不遗留后台task
+- [x] 4.3 实现`postgres`/`gomtm`/同名profile/`require_auth=oauth`/`verify-full`逐请求连接、无password/SCRAM/pool/`SET ROLE` fallback，并验证不同principal并发真实`system_user`
+- [x] 4.4 实现`PQsendQueryParams` extended protocol、结构化参数与一个顶层statement，覆盖空bind、多命令拒绝和合法CTE/`CALL`/`DO`
+- [x] 4.5 实现service-owned read-only/confirmed-change事务、commit前缓冲、columns/rows/command tag/affected rows和SQLSTATE脱敏分类，所有失败rollback或关闭
+- [x] 4.6 固化request/statement/bind/connection/lock/transaction/1000-row/1-MiB/256-KiB/deadline预算，并由connection owner传播cancel且不遗留后台task
 
 ## 5. 完成HTTPS服务与远端GREEN
 
-- [ ] 5.1 使用成熟Rust HTTP/TLS runtime组装唯一executor入口、并发semaphore、readiness、correlation审计和统一错误响应，不记录secret、token、SQL、bind或结果
+- [x] 5.1 使用成熟Rust HTTP/TLS runtime组装唯一executor入口、并发semaphore、readiness、correlation审计和统一错误响应，不记录secret、token、SQL、bind或结果
 - [ ] 5.2 更新标准CI，使PR/main一次解析共享Cargo.lock与PG18/libpq输入并运行validator、executor Rust、C layout、真实PG18、并发、TLS和cancel门禁
-- [ ] 5.3 非force推送最小生产实现到`main`，取得精确SHA的Rustfmt、Clippy、validator、executor与真实PG18完整GREEN run；失败只向前修复且保留历史
+- [x] 5.3 非force推送最小生产实现到`main`，取得精确SHA的Rustfmt、Clippy、validator、executor与真实PG18完整GREEN run；失败只向前修复且保留历史
 
 ## 6. 构建并发布executor image
 

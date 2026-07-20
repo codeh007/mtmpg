@@ -4,12 +4,13 @@ on:
   push:
     tags:
       - "v[0-9]*.[0-9]*.[0-9]*"
+      - "executor-v[0-9]*.[0-9]*.[0-9]*"
 
 permissions:
   contents: read
 
 concurrency:
-  group: mtmpg-release
+  group: mtmpg-release-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -18,6 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
+      product: ${{ steps.version.outputs.product }}
       prerelease: ${{ steps.version.outputs.prerelease }}
       version: ${{ steps.version.outputs.version }}
 
@@ -30,12 +32,23 @@ jobs:
           test "$GITHUB_REPOSITORY" = "codeh007/mtmpg"
           test "$GITHUB_REF_TYPE" = "tag"
           tag="$GITHUB_REF_NAME"
-          [[ "$tag" == v* ]]
-          version="$(cut -c2- <<<"$tag")"
+          case "$tag" in
+            executor-v*)
+              product=executor
+              version="${tag#executor-v}"
+              expected_tag="executor-v$version"
+              ;;
+            v*)
+              product=validator
+              version="${tag#v}"
+              expected_tag="v$version"
+              ;;
+            *) exit 1 ;;
+          esac
           identifier='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
           semver="^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(-$identifier([.]$identifier)*)?$"
           [[ "$version" =~ $semver ]]
-          test "$tag" = "v$version"
+          test "$tag" = "$expected_tag"
           test "$(printf '%s' "$version" | wc --bytes)" -le 120
 
           prerelease=false
@@ -43,6 +56,7 @@ jobs:
             prerelease=true
           fi
           {
+            echo "product=$product"
             echo "prerelease=$prerelease"
             echo "version=$version"
           } >>"$GITHUB_OUTPUT"
@@ -55,6 +69,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       upload_release_artifacts: true
+      release_product: ${{ needs.metadata.outputs.product }}
       release_version: ${{ needs.metadata.outputs.version }}
 
   publish:
@@ -73,12 +88,23 @@ jobs:
       artifact-metadata: write
     env:
       GH_TOKEN: ${{ github.token }}
-      IMAGE_REPOSITORY: ghcr.io/codeh007/mtmpg
+      ARCHIVE_NAME: ${{ needs.metadata.outputs.product == 'executor' && 'mtmpg-executor.oci.tar' || 'mtmpg.oci.tar' }}
+      ARTIFACT_HASH_FIELD: ${{ needs.metadata.outputs.product == 'executor' && 'binary_sha256' || 'module_sha256' }}
+      ARTIFACT_PATH: ${{ needs.metadata.outputs.product == 'executor' && '/usr/local/bin/mtmpg-executor' || '/usr/lib/postgresql/18/lib/pggomtm.so' }}
+      EXPECTED_VERIFIED_SCHEMA: ${{ needs.metadata.outputs.product == 'executor' && 'mtmpg-executor-verified-image/v1' || 'mtmpg-verified-image/v2' }}
+      IMAGE_REPOSITORY: ${{ needs.metadata.outputs.product == 'executor' && 'ghcr.io/codeh007/mtmpg-executor' || 'ghcr.io/codeh007/mtmpg' }}
       PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
+      PRODUCT: ${{ needs.metadata.outputs.product }}
       TAG: ${{ github.ref_name }}
       VERSION: ${{ needs.metadata.outputs.version }}
 
     steps:
+      - name: Checkout immutable tag source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Download verified release materials
         uses: actions/download-artifact@v8
         with:
@@ -101,6 +127,7 @@ jobs:
 
       - name: Validate immutable tag and verified materials
         env:
+          CI_PRODUCT: ${{ needs.ci.outputs.product }}
           CI_SOURCE: ${{ needs.ci.outputs.source }}
           CI_VERSION: ${{ needs.ci.outputs.version }}
         shell: bash
@@ -108,20 +135,27 @@ jobs:
           set -euo pipefail
           material_root="$RUNNER_TEMP/release-materials"
           asset_root="$RUNNER_TEMP/release-assets"
-          archive="$material_root/mtmpg.oci.tar"
-          for required in Cargo.lock resolved-inputs.json verified-image.json mtmpg.oci.tar; do
+          archive="$material_root/$ARCHIVE_NAME"
+          for required in Cargo.lock resolved-inputs.json verified-image.json "$ARCHIVE_NAME"; do
             test -f "$material_root/$required"
             test ! -L "$material_root/$required"
           done
 
           test "$TAG" = "$GITHUB_REF_NAME"
+          test "$CI_PRODUCT" = "$PRODUCT"
           test "$CI_SOURCE" = "$GITHUB_SHA"
           test "$CI_VERSION" = "$VERSION"
-          test "$(jq --raw-output '.schema' "$material_root/resolved-inputs.json")" = "mtmpg-resolved-inputs/v1"
-          test "$(jq --raw-output '.schema' "$material_root/verified-image.json")" = "mtmpg-verified-image/v1"
+          test "$(git cat-file -t "refs/tags/$TAG")" = tag
+          test "$(git rev-parse "refs/tags/$TAG^{}")" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+          test "$(jq --raw-output '.schema' "$material_root/resolved-inputs.json")" = "mtmpg-resolved-inputs/v2"
+          test "$(jq --raw-output '.schema' "$material_root/verified-image.json")" = "$EXPECTED_VERIFIED_SCHEMA"
+          test "$(jq --raw-output '.release_product' "$material_root/resolved-inputs.json")" = "$PRODUCT"
+          test "$(jq --raw-output '.product' "$material_root/verified-image.json")" = "$PRODUCT"
           test "$(jq --raw-output '.source' "$material_root/resolved-inputs.json")" = "$GITHUB_SHA"
           test "$(jq --raw-output '.source' "$material_root/verified-image.json")" = "$GITHUB_SHA"
           test "$(jq --raw-output '.version' "$material_root/resolved-inputs.json")" = "$VERSION"
+          test "$(jq --arg product "$PRODUCT" --raw-output '.products[$product].version' "$material_root/resolved-inputs.json")" = "$VERSION"
           test "$(jq --raw-output '.version' "$material_root/verified-image.json")" = "$VERSION"
           test "$(jq --raw-output '.workflow.run_id' "$material_root/resolved-inputs.json")" = "$GITHUB_RUN_ID"
           test "$(jq --raw-output '.workflow.run_attempt' "$material_root/resolved-inputs.json")" = "$GITHUB_RUN_ATTEMPT"
@@ -135,6 +169,8 @@ jobs:
           test "$resolved_sha256" = "$(jq --raw-output '.resolved_inputs_sha256' "$material_root/verified-image.json")"
           test "$archive_sha256" = "$(jq --raw-output '.oci_archive_sha256' "$material_root/verified-image.json")"
           test "$archive_digest" = "$(jq --raw-output '.oci_manifest_digest' "$material_root/verified-image.json")"
+          artifact_sha256="$(jq --arg field "$ARTIFACT_HASH_FIELD" --raw-output '.[$field]' "$material_root/verified-image.json")"
+          [[ "$artifact_sha256" =~ ^[0-9a-f]{64}$ ]]
 
           tag_source="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)"
           test "$tag_source" = "$GITHUB_SHA"
@@ -155,14 +191,37 @@ jobs:
           if skopeo inspect --authfile "$auth_file" "docker://$IMAGE_REPOSITORY:latest" >/dev/null 2>&1; then
             latest_before="$(skopeo inspect --authfile "$auth_file" --format '{{.Digest}}' "docker://$IMAGE_REPOSITORY:latest")"
           fi
+          latest_release_before="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
+
+          validator_release_before=""
+          validator_source_before=""
+          validator_version_digest_before=""
+          validator_latest_digest_before=""
+          if test "$PRODUCT" = executor; then
+            validator_source_before="$(gh api "repos/$GITHUB_REPOSITORY/commits/v0.2.0" --jq .sha)"
+            validator_release_before="$(
+              gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.2.0" \
+                --jq '{id, tag_name, target_commitish, published_at, updated_at, assets: [.assets[] | {id, name, size, digest}]}' \
+                | sha256sum \
+                | cut -d' ' -f1
+            )"
+            validator_version_digest_before="$(skopeo inspect --authfile "$auth_file" --format '{{.Digest}}' "docker://ghcr.io/codeh007/mtmpg:0.2.0")"
+            validator_latest_digest_before="$(skopeo inspect --authfile "$auth_file" --format '{{.Digest}}' "docker://ghcr.io/codeh007/mtmpg:latest")"
+          fi
 
           install -d -m 0755 "$asset_root"
           {
             echo "ARCHIVE=$archive"
+            echo "ARTIFACT_SHA256=$artifact_sha256"
             echo "ASSET_ROOT=$asset_root"
             echo "LATEST_BEFORE=$latest_before"
+            echo "LATEST_RELEASE_BEFORE=$latest_release_before"
             echo "MATERIAL_ROOT=$material_root"
             echo "TARGET_REFERENCE=$target_reference"
+            echo "VALIDATOR_LATEST_DIGEST_BEFORE=$validator_latest_digest_before"
+            echo "VALIDATOR_RELEASE_BEFORE=$validator_release_before"
+            echo "VALIDATOR_SOURCE_BEFORE=$validator_source_before"
+            echo "VALIDATOR_VERSION_DIGEST_BEFORE=$validator_version_digest_before"
           } >>"$GITHUB_ENV"
 
       - name: Push the verified OCI archive once
@@ -208,7 +267,10 @@ jobs:
           jq --null-input \
             --slurpfile resolved "$MATERIAL_ROOT/resolved-inputs.json" \
             --slurpfile verified "$MATERIAL_ROOT/verified-image.json" \
+            --arg artifact_path "$ARTIFACT_PATH" \
+            --arg artifact_sha256 "$ARTIFACT_SHA256" \
             --arg image_repository "$IMAGE_REPOSITORY" \
+            --arg product "$PRODUCT" \
             --arg registry_digest "$REGISTRY_DIGEST" \
             --arg sbom_sha256 "$(sha256sum "$ASSET_ROOT/sbom.spdx.json" | cut -d' ' -f1)" \
             --arg skopeo "$(skopeo --version)" \
@@ -216,7 +278,8 @@ jobs:
             --arg tag "$TAG" \
             --argjson prerelease "$PRERELEASE" \
             '{
-              schema: "mtmpg-release-manifest/v1",
+              schema: "mtmpg-release-manifest/v2",
+              product: $product,
               version: $verified[0].version,
               tag: $tag,
               prerelease: $prerelease,
@@ -227,9 +290,9 @@ jobs:
               rust: $resolved[0].rust,
               pgrx: $resolved[0].pgrx,
               postgresql: $resolved[0].postgresql,
-              module: {
-                path: "/usr/lib/postgresql/18/lib/pggomtm.so",
-                sha256: $verified[0].module_sha256
+              artifact: {
+                path: $artifact_path,
+                sha256: $artifact_sha256
               },
               oci: {
                 archive_sha256: $verified[0].oci_archive_sha256,
@@ -374,15 +437,14 @@ jobs:
           skopeo copy \
             --authfile "$anonymous_auth" \
             "docker://$TARGET_REFERENCE" \
-            "docker-archive:$RUNNER_TEMP/anonymous-image.tar:mtmpg-verify:$VERSION"
+            "docker-archive:$RUNNER_TEMP/anonymous-image.tar:mtmpg-release-verify:$VERSION"
           docker load --input "$RUNNER_TEMP/anonymous-image.tar" >/dev/null
-          container_id="$(docker create "mtmpg-verify:$VERSION")"
+          container_id="$(docker create "mtmpg-release-verify:$VERSION")"
           docker cp \
-            "$container_id:/usr/lib/postgresql/18/lib/pggomtm.so" \
-            "$RUNNER_TEMP/anonymous-pggomtm.so"
+            "$container_id:$ARTIFACT_PATH" \
+            "$RUNNER_TEMP/anonymous-artifact"
           docker rm "$container_id" >/dev/null
-          test "$(sha256sum "$RUNNER_TEMP/anonymous-pggomtm.so" | cut -d' ' -f1)" = \
-            "$(jq --raw-output '.module_sha256' "$MATERIAL_ROOT/verified-image.json")"
+          test "$(sha256sum "$RUNNER_TEMP/anonymous-artifact" | cut -d' ' -f1)" = "$ARTIFACT_SHA256"
 
           attestation_count="$(gh api "repos/$GITHUB_REPOSITORY/attestations/$REGISTRY_DIGEST?per_page=10" --jq '.attestations | length')"
           test "$attestation_count" -ge 2
@@ -391,7 +453,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          release_notes="PostgreSQL 18 OAuth validator image: $IMAGE_REPOSITORY:$VERSION
+          if test "$PRODUCT" = executor; then
+            release_title="mtmpg executor $VERSION"
+            release_description="PostgreSQL 18 OAuth SQL executor image"
+          else
+            release_title="mtmpg $VERSION"
+            release_description="PostgreSQL 18 OAuth validator image"
+          fi
+          release_notes="$release_description: $IMAGE_REPOSITORY:$VERSION
 
           Source: $GITHUB_SHA
           OCI digest: $REGISTRY_DIGEST"
@@ -411,15 +480,31 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --prerelease \
-              --title "mtmpg $VERSION" \
+              --title "$release_title" \
               --notes "$release_notes"
-          else
+          elif test "$PRODUCT" = validator; then
             gh release create "$TAG" "${files[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --latest \
-              --title "mtmpg $VERSION" \
+              --title "$release_title" \
               --notes "$release_notes"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$TAG" \
+              -f target_commitish="$GITHUB_SHA" \
+              -f name="$release_title" \
+              -f body="$release_notes" \
+              -F draft=false \
+              -F prerelease=false \
+              -f make_latest=false \
+              >"$RUNNER_TEMP/created-executor-release.json"
+            jq --exit-status \
+              --arg tag "$TAG" \
+              '.tag_name == $tag and .draft == false and .prerelease == false' \
+              "$RUNNER_TEMP/created-executor-release.json" >/dev/null
+            gh release upload "$TAG" "${files[@]}" \
+              --repo "$GITHUB_REPOSITORY"
           fi
 
       - name: Verify public Release assets and latest policy
@@ -458,16 +543,23 @@ jobs:
             sha256sum --check checksums.txt
           )
           jq --exit-status \
+            --arg product "$PRODUCT" \
             --arg source "$GITHUB_SHA" \
             --arg version "$VERSION" \
             --arg digest "$REGISTRY_DIGEST" \
-            '.source == $source and .version == $version and
+            --arg artifact_path "$ARTIFACT_PATH" \
+            --arg artifact_sha256 "$ARTIFACT_SHA256" \
+            '.schema == "mtmpg-release-manifest/v2" and
+             .product == $product and
+             .source == $source and .version == $version and
+             .artifact.path == $artifact_path and
+             .artifact.sha256 == $artifact_sha256 and
              .oci.manifest_digest == $digest and
              .oci.registry_digest == $digest' \
             "$verify_root/release-manifest.json" >/dev/null
 
           auth_file="$HOME/.docker/config.json"
-          if test "$PRERELEASE" = true; then
+          if test "$PRERELEASE" = true || test "$PRODUCT" = executor; then
             if test "$LATEST_BEFORE" = absent; then
               ! skopeo inspect --authfile "$auth_file" "docker://$IMAGE_REPOSITORY:latest" >/dev/null 2>&1
             else
@@ -480,4 +572,24 @@ jobs:
               "oci-archive:$ARCHIVE" \
               "docker://$IMAGE_REPOSITORY:latest"
             test "$(skopeo inspect --authfile "$auth_file" --format '{{.Digest}}' "docker://$IMAGE_REPOSITORY:latest")" = "$REGISTRY_DIGEST"
+          fi
+
+          latest_release_after="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
+          if test "$PRODUCT" = validator && test "$PRERELEASE" = false; then
+            test "$latest_release_after" = "$TAG"
+          else
+            test "$latest_release_after" = "$LATEST_RELEASE_BEFORE"
+          fi
+
+          if test "$PRODUCT" = executor; then
+            test "$(gh api "repos/$GITHUB_REPOSITORY/commits/v0.2.0" --jq .sha)" = "$VALIDATOR_SOURCE_BEFORE"
+            validator_release_after="$(
+              gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.2.0" \
+                --jq '{id, tag_name, target_commitish, published_at, updated_at, assets: [.assets[] | {id, name, size, digest}]}' \
+                | sha256sum \
+                | cut -d' ' -f1
+            )"
+            test "$validator_release_after" = "$VALIDATOR_RELEASE_BEFORE"
+            test "$(skopeo inspect --authfile "$auth_file" --format '{{.Digest}}' "docker://ghcr.io/codeh007/mtmpg:0.2.0")" = "$VALIDATOR_VERSION_DIGEST_BEFORE"
+            test "$(skopeo inspect --authfile "$auth_file" --format '{{.Digest}}' "docker://ghcr.io/codeh007/mtmpg:latest")" = "$VALIDATOR_LATEST_DIGEST_BEFORE"
           fi

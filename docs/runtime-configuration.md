@@ -32,8 +32,8 @@
 ```json
 {
   "schema": "pggomtm-validator-config/v1",
-  "issuer": "https://candidate.example.test/oauth/database",
-  "audience": "https://candidate.example.test/resources/database/gomtm-test",
+  "issuer": "https://auth.example.test/database",
+  "audience": "https://postgres.example.test/database/main",
   "jwks_path": "/etc/pggomtm/jwks.json"
 }
 ```
