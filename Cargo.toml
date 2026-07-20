@@ -27,7 +27,7 @@ pgx-oauth-gate = ["pg18"]
 
 [dependencies]
 jaws = { version = "1", default-features = false, features = ["p256"] }
-p256 = { version = "0.13", features = ["ecdsa", "jwk"] }
+p256 = { version = "0.14", features = ["ecdsa", "jwk"] }
 pgrx = { version = "0.19", default-features = false, optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
