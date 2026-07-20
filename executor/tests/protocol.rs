@@ -98,6 +98,18 @@ fn non_expiring_api_key_is_valid_but_oauth_requires_credential_expiry() {
         parse_value(&request_value(oauth)),
         Err(ProtocolError::InvalidRequest)
     );
+
+    for method in ["api_key", "oauth"] {
+        let mut missing_expiry = principal(method, "ordinary");
+        missing_expiry
+            .as_object_mut()
+            .expect("principal object")
+            .remove("credential_expires_at");
+        assert_eq!(
+            parse_value(&request_value(missing_expiry)),
+            Err(ProtocolError::InvalidRequest)
+        );
+    }
 }
 
 #[test]
