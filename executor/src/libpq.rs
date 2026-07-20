@@ -17,6 +17,7 @@ pub const MAX_RESULT_VALUE_BYTES: usize = 256 * 1024;
 pub const TOTAL_DEADLINE: Duration = Duration::from_secs(3);
 
 const POLL_SLICE_MICROSECONDS: i64 = 50_000;
+const OAUTH_CLIENT_ID: &str = "sql-executor";
 const JSON_OID: u32 = 114;
 const JSONB_OID: u32 = 3_802;
 
@@ -60,15 +61,17 @@ pub struct DatabaseConfig {
     pub host: String,
     pub database: String,
     pub ca_path: String,
+    pub oauth_issuer: String,
 }
 
 impl DatabaseConfig {
     #[must_use]
-    pub fn canonical(ca_path: impl Into<String>) -> Self {
+    pub fn canonical(ca_path: impl Into<String>, oauth_issuer: impl Into<String>) -> Self {
         Self {
             host: "postgres".into(),
             database: "gomtm".into(),
             ca_path: ca_path.into(),
+            oauth_issuer: oauth_issuer.into(),
         }
     }
 }
@@ -383,6 +386,8 @@ impl PgConnection {
             c_string("user")?,
             c_string("sslmode")?,
             c_string("sslrootcert")?,
+            c_string("oauth_issuer")?,
+            c_string("oauth_client_id")?,
             c_string("require_auth")?,
         ];
         let values = [
@@ -391,6 +396,8 @@ impl PgConnection {
             c_string(user)?,
             c_string("verify-full")?,
             c_string(&config.ca_path)?,
+            c_string(&config.oauth_issuer)?,
+            c_string(OAUTH_CLIENT_ID)?,
             c_string("oauth")?,
         ];
         let mut key_pointers: Vec<*const c_char> =

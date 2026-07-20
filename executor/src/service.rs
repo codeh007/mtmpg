@@ -71,6 +71,7 @@ impl RuntimeConfig {
         let issuer = startup_stage(required_environment("MTMPG_EXECUTOR_ISSUER"), "issuer")?;
         let audience = startup_stage(required_environment("MTMPG_EXECUTOR_AUDIENCE"), "issuer")?;
         let key_id = startup_stage(required_environment("MTMPG_EXECUTOR_KEY_ID"), "issuer")?;
+        let database_issuer = issuer.clone();
         let issuer_config = startup_stage(IssuerConfig::new(issuer, audience, key_id), "issuer")?;
 
         let registry = Arc::new(startup_stage(
@@ -100,7 +101,7 @@ impl RuntimeConfig {
             state: AppState {
                 authenticator: Arc::new(authenticator),
                 issuer: Arc::new(DatabaseTokenIssuer::new(issuer_config, signing_key)),
-                database: DatabaseConfig::canonical(ca_path),
+                database: DatabaseConfig::canonical(ca_path, database_issuer),
                 registry,
                 concurrency: Arc::new(Semaphore::new(MAX_CONCURRENCY)),
             },
