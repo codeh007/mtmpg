@@ -511,4 +511,4 @@ jobs:
           PGGOMTM_POSTGRES_IMAGE="$postgres_image" \
             tests/postgres_integration.sh \
               run-executor \
-              "$RUNNER_TEMP/executor-integration"
+              "$RUNNER_TEMP/executor-integration/artifacts"

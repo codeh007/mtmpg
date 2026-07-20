@@ -52,7 +52,7 @@ RUN cargo build --locked --release --lib --no-default-features --features pg18 \
       "${CARGO_TARGET_DIR}/executor-integration"
 
 FROM scratch AS integration-artifacts
-COPY --from=build /src/target/executor-integration /
+COPY --from=build /src/target/executor-integration /artifacts
 
 FROM ${RUNTIME_IMAGE}
 
