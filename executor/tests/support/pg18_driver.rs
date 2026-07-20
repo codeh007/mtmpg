@@ -307,7 +307,7 @@ fn verify_transaction_and_budget_boundaries(harness: &Harness) -> Result<(), Box
     let mut oversized_change = harness.request(
         "business_admin",
         "api_key",
-        "INSERT INTO app.executor_probe(value) SELECT 'budget' FROM generate_series(1, 1001) RETURNING value",
+        "INSERT INTO app.executor_probe(value) SELECT 'budget-' || value::text FROM generate_series(1, 1001) AS generated(value) RETURNING value",
     );
     oversized_change["intent"] = json!("change");
     oversized_change["change_confirmed"] = json!(true);
@@ -334,7 +334,7 @@ fn verify_transaction_and_budget_boundaries(harness: &Harness) -> Result<(), Box
     let count = harness.execute(harness.request(
         "ordinary",
         "oauth",
-        "SELECT count(*) FROM app.executor_probe WHERE value IN ('read-write', 'failed', 'budget')",
+        "SELECT count(*) FROM app.executor_probe WHERE value IN ('read-write', 'failed') OR value LIKE 'budget-%'",
     ))?;
     let result = expect_success(&count, "rollback count")?;
     assert_json(&result["rows"][0][0], &json!("0"), "rollback count")?;
