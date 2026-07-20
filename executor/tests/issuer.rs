@@ -51,7 +51,7 @@ fn principal(method: AuthMethod, profile: DatabaseProfile) -> DelegatedPrincipal
         authority_version: 7,
         database_scope: "database".into(),
         profile,
-        credential_expires_at: NOW + 300,
+        credential_expires_at: Some(NOW + 300),
     }
 }
 
@@ -115,15 +115,27 @@ fn issues_exact_thirty_second_tokens_for_every_actor_and_generic_profile() {
 fn credential_must_cover_the_complete_token_lifetime() {
     let issuer = issuer();
     let mut too_short = principal(AuthMethod::OAuth, DatabaseProfile::Ordinary);
-    too_short.credential_expires_at = NOW + DATABASE_TOKEN_TTL_SECONDS - 1;
+    too_short.credential_expires_at = Some(NOW + DATABASE_TOKEN_TTL_SECONDS - 1);
     assert_eq!(
         issuer.issue(&too_short, NOW),
         Err(IssuerError::CredentialExpiresTooSoon)
     );
 
     let mut exact = too_short;
-    exact.credential_expires_at = NOW + DATABASE_TOKEN_TTL_SECONDS;
+    exact.credential_expires_at = Some(NOW + DATABASE_TOKEN_TTL_SECONDS);
     assert!(issuer.issue(&exact, NOW).is_ok());
+}
+
+#[test]
+fn non_expiring_api_key_can_issue_but_oauth_cannot_omit_expiry() {
+    let issuer = issuer();
+    let mut api_key = principal(AuthMethod::ApiKey, DatabaseProfile::Ordinary);
+    api_key.credential_expires_at = None;
+    assert!(issuer.issue(&api_key, NOW).is_ok());
+
+    let mut oauth = principal(AuthMethod::OAuth, DatabaseProfile::Ordinary);
+    oauth.credential_expires_at = None;
+    assert_eq!(issuer.issue(&oauth, NOW), Err(IssuerError::InvalidPrincipal));
 }
 
 #[test]

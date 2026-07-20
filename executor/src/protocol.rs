@@ -27,7 +27,7 @@ pub struct DelegatedPrincipal {
     pub authority_version: u64,
     pub database_scope: String,
     pub profile: DatabaseProfile,
-    pub credential_expires_at: i64,
+    pub credential_expires_at: Option<i64>,
 }
 
 impl DelegatedPrincipal {
@@ -44,13 +44,19 @@ impl DelegatedPrincipal {
             (self.auth_method, &self.client_id, &self.credential_id),
             (AuthMethod::OAuth, Some(_), None) | (AuthMethod::ApiKey, None, Some(_))
         );
+        let credential_expiry_matches = match (self.auth_method, self.credential_expires_at) {
+            (AuthMethod::OAuth, Some(expires_at))
+            | (AuthMethod::ApiKey, Some(expires_at)) => expires_at > 0,
+            (AuthMethod::ApiKey, None) => true,
+            (AuthMethod::OAuth, None) => false,
+        };
         actor_matches
             && is_internal_id(&self.user_id)
             && is_internal_id(self.actor_id())
             && is_internal_id(&self.delegation_id)
             && self.authority_version > 0
             && self.database_scope == "database"
-            && self.credential_expires_at > 0
+            && credential_expiry_matches
     }
 }
 

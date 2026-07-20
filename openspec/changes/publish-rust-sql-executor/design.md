@@ -54,7 +54,7 @@ Executor build从CI解析的PostgreSQL 18 `pg_config --includedir/libpq-fe.h`使
 
 Executor使用成熟Rust HTTP/TLS runtime提供唯一versioned HTTPS path。请求在JSON解析前限制body大小，并验证version、method、固定path、Unix timestamp、128-bit nonce和原始body SHA-256的HMAC-SHA256；签名使用constant-time比较，nonce进入有界30秒TTL replay store。认证失败返回统一未授权响应。
 
-Strict request只含`DelegatedPrincipal`、一个statement、结构化binds、`read|change` intent、change confirmation与server接受的correlation ID。未知字段、外部credential、database JWT、role、issuer、audience、claims、connection string或`statements[]`整体拒绝。初版只允许运行一个instance；扩容前必须把nonce store替换为共享原子authority。
+Strict request只含`DelegatedPrincipal`、一个statement、结构化binds、`read|change` intent、change confirmation与server接受的correlation ID。OAuth principal必须携带有效credential expiry；API-key principal可用`null`表示永不过期，wire保持`null`且不使用时间戳哨兵。未知字段、外部credential、database JWT、role、issuer、audience、claims、connection string或`statements[]`整体拒绝。初版只允许运行一个instance；扩容前必须把nonce store替换为共享原子authority。
 
 ### 6. 每请求一个libpq连接和一个服务端事务
 

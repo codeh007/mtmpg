@@ -72,8 +72,10 @@ impl DatabaseTokenIssuer {
         let expires_at = now
             .checked_add(DATABASE_TOKEN_TTL_SECONDS)
             .ok_or(IssuerError::InvalidPrincipal)?;
-        if principal.credential_expires_at < expires_at {
-            return Err(IssuerError::CredentialExpiresTooSoon);
+        if let Some(credential_expires_at) = principal.credential_expires_at {
+            if credential_expires_at < expires_at {
+                return Err(IssuerError::CredentialExpiresTooSoon);
+            }
         }
 
         let (client_id, credential_id) = match principal.auth_method {
