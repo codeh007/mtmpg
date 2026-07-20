@@ -13,3 +13,7 @@
 !executor/Cargo.toml
 !executor/src/
 !executor/src/**
+!executor/tests/
+!executor/tests/support/
+!executor/tests/support/executor_fixture.rs
+!executor/tests/support/pg18_driver.rs

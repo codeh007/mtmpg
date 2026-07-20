@@ -35,6 +35,7 @@ COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml LICENSE ./
 COPY executor/Cargo.toml ./executor/Cargo.toml
 COPY src ./src
 COPY executor/src ./executor/src
+COPY executor/tests/support ./executor/tests/support
 
 RUN cargo build --locked --release --lib --no-default-features --features pg18
 

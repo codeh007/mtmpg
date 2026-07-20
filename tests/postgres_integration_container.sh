@@ -6,6 +6,7 @@ export LC_ALL=C
 
 ARTIFACT_ROOT=""
 ACTIVE_PGDATA=""
+EXECUTOR_PID=""
 PKGLIBDIR=""
 
 fail() {
@@ -80,7 +81,16 @@ stop_active_cluster() {
   ACTIVE_PGDATA=""
 }
 
+stop_executor() {
+  if test -n "${EXECUTOR_PID}" && kill -0 "${EXECUTOR_PID}" >/dev/null 2>&1; then
+    kill -TERM "${EXECUTOR_PID}" >/dev/null 2>&1 || true
+    wait "${EXECUTOR_PID}" >/dev/null 2>&1 || true
+  fi
+  EXECUTOR_PID=""
+}
+
 cleanup() {
+  stop_executor
   stop_active_cluster
   rm -rf \
     /etc/pggomtm \
@@ -92,7 +102,11 @@ cleanup() {
     /tmp/pggomtm-oauth-fixtures \
     /tmp/pggomtm-production-backend-pgdata \
     /tmp/pggomtm-production-backend-server.log \
-    /tmp/pggomtm-production-backend-fixtures
+    /tmp/pggomtm-production-backend-fixtures \
+    /tmp/mtmpg-executor-pgdata \
+    /tmp/mtmpg-executor-runtime \
+    /tmp/mtmpg-executor-server.log \
+    /tmp/mtmpg-executor-service.log
 
   if test -n "${PKGLIBDIR}"; then
     rm -f \
@@ -108,11 +122,13 @@ trap cleanup EXIT INT TERM
 usage() {
   printf '%s\n' \
     'usage: tests/postgres_integration_container.sh run ARTIFACT_DIRECTORY' \
+    '       tests/postgres_integration_container.sh run-executor ARTIFACT_DIRECTORY' \
     '' \
     'matrices:' \
     '  abi-runtime' \
     '  oauth-gate' \
-    '  production-backend'
+    '  production-backend' \
+    '  executor-oauth-sql'
 }
 
 require_artifact() {
@@ -150,6 +166,40 @@ verify_runtime() {
   chmod 0755 \
     "${ARTIFACT_ROOT}/pggomtm_oauth_smoke_client" \
     "${ARTIFACT_ROOT}/pggomtm_oauth_smoke_fixture"
+}
+
+verify_executor_runtime() {
+  test "$(id -u)" -eq 0 || fail "container harness must run as root"
+  command -v gosu >/dev/null || fail "official postgres image does not provide gosu"
+  command -v pg_config >/dev/null || fail "official postgres image does not provide pg_config"
+  [[ "$(pg_config --version)" =~ ^PostgreSQL\ 18\. ]] || \
+    fail "container runtime is not PostgreSQL 18"
+  PKGLIBDIR="$(pg_config --pkglibdir)"
+  test "${PKGLIBDIR}" = "/usr/lib/postgresql/18/lib" || \
+    fail "container runtime has an unexpected module directory"
+
+  local artifact
+  for artifact in \
+    mtmpg-executor \
+    mtmpg_executor_fixture \
+    mtmpg_executor_pg18_driver \
+    pggomtm.so \
+    executor_postgres_setup.sql \
+    runtime/ca.crt \
+    runtime/executor.crt \
+    runtime/executor.key \
+    runtime/hmac.secret \
+    runtime/jwks.json \
+    runtime/postgres.crt \
+    runtime/postgres.key \
+    runtime/signing-key.pem \
+    runtime/validator.json; do
+    require_artifact "${artifact}"
+  done
+  chmod 0755 \
+    "${ARTIFACT_ROOT}/mtmpg-executor" \
+    "${ARTIFACT_ROOT}/mtmpg_executor_fixture" \
+    "${ARTIFACT_ROOT}/mtmpg_executor_pg18_driver"
 }
 
 install_module() {
@@ -204,6 +254,16 @@ psql_command() {
     --username=postgres \
     --dbname=postgres \
     --command="$1" >/dev/null
+}
+
+psql_scalar() {
+  gosu postgres psql \
+    --host=/tmp \
+    --username=postgres \
+    --dbname=postgres \
+    --tuples-only \
+    --no-align \
+    --command="$1"
 }
 
 install_runtime_config() {
@@ -432,6 +492,131 @@ run_production_backend_smoke() {
   printf 'PG18 production backend smoke passed\n'
 }
 
+install_executor_runtime() {
+  local runtime_root="$1"
+  rm -rf /etc/pggomtm "${runtime_root}"
+  install -d -m 0555 /etc/pggomtm
+  install -m 0444 "${ARTIFACT_ROOT}/runtime/validator.json" /etc/pggomtm/validator.json
+  install -m 0444 "${ARTIFACT_ROOT}/runtime/jwks.json" /etc/pggomtm/jwks.json
+
+  install -d -m 0700 -o postgres -g postgres "${runtime_root}"
+  install -m 0444 -o postgres -g postgres \
+    "${ARTIFACT_ROOT}/runtime/ca.crt" \
+    "${ARTIFACT_ROOT}/runtime/executor.crt" \
+    "${runtime_root}"
+  install -m 0400 -o postgres -g postgres \
+    "${ARTIFACT_ROOT}/runtime/executor.key" \
+    "${ARTIFACT_ROOT}/runtime/hmac.secret" \
+    "${ARTIFACT_ROOT}/runtime/signing-key.pem" \
+    "${runtime_root}"
+}
+
+run_executor_oauth_sql_matrix() {
+  local pgdata="/tmp/mtmpg-executor-pgdata"
+  local postgres_log="/tmp/mtmpg-executor-server.log"
+  local executor_log="/tmp/mtmpg-executor-service.log"
+  local runtime_root="/tmp/mtmpg-executor-runtime"
+
+  install_module pggomtm.so pggomtm.so
+  install_executor_runtime "${runtime_root}"
+  install -d -m 0700 -o postgres -g postgres "${pgdata}"
+  gosu postgres initdb \
+    --pgdata="${pgdata}" \
+    --encoding=UTF8 \
+    --no-locale \
+    --auth-local=trust \
+    --auth-host=reject >/dev/null
+  install -m 0600 -o postgres -g postgres \
+    "${ARTIFACT_ROOT}/runtime/postgres.key" \
+    "${pgdata}/server.key"
+  install -m 0644 -o postgres -g postgres \
+    "${ARTIFACT_ROOT}/runtime/postgres.crt" \
+    "${pgdata}/server.crt"
+  sed -i \
+    '1ihostssl gomtm database_developer 0.0.0.0/0 oauth issuer="https://auth.example.test/database" scope="database" validator=pggomtm delegate_ident_mapping=1' \
+    "${pgdata}/pg_hba.conf"
+  sed -i \
+    '1ihostssl gomtm business_admin 0.0.0.0/0 oauth issuer="https://auth.example.test/database" scope="database" validator=pggomtm delegate_ident_mapping=1' \
+    "${pgdata}/pg_hba.conf"
+  sed -i \
+    '1ihostssl gomtm ordinary 0.0.0.0/0 oauth issuer="https://auth.example.test/database" scope="database" validator=pggomtm delegate_ident_mapping=1' \
+    "${pgdata}/pg_hba.conf"
+  ACTIVE_PGDATA="${pgdata}"
+  gosu postgres pg_ctl \
+    --pgdata="${pgdata}" \
+    --log="${postgres_log}" \
+    --options="-c listen_addresses='*' -c ssl=on -c log_min_messages=log -c oauth_validator_libraries=pggomtm" \
+    --wait start >/dev/null
+  psql_file "${ARTIFACT_ROOT}/executor_postgres_setup.sql"
+
+  grep --quiet ' executor$' /etc/hosts || printf '127.0.0.1 executor\n' >>/etc/hosts
+  gosu postgres env \
+    MTMPG_EXECUTOR_AUDIENCE=https://postgres.example.test/database/main \
+    MTMPG_EXECUTOR_HMAC_SECRET_PATH="${runtime_root}/hmac.secret" \
+    MTMPG_EXECUTOR_ISSUER=https://auth.example.test/database \
+    MTMPG_EXECUTOR_KEY_ID=executor-es256-test \
+    MTMPG_EXECUTOR_LISTEN=0.0.0.0:8443 \
+    MTMPG_EXECUTOR_POSTGRES_CA_PATH="${runtime_root}/ca.crt" \
+    MTMPG_EXECUTOR_SIGNING_KEY_PATH="${runtime_root}/signing-key.pem" \
+    MTMPG_EXECUTOR_TLS_CERT_PATH="${runtime_root}/executor.crt" \
+    MTMPG_EXECUTOR_TLS_KEY_PATH="${runtime_root}/executor.key" \
+    "${ARTIFACT_ROOT}/mtmpg-executor" >"${executor_log}" 2>&1 &
+  EXECUTOR_PID=$!
+
+  sleep 1
+  kill -0 "${EXECUTOR_PID}" >/dev/null 2>&1 || \
+    fail "executor service exited before readiness"
+  MTMPG_EXECUTOR_CA_PATH="${runtime_root}/ca.crt" \
+  MTMPG_EXECUTOR_HMAC_PATH="${runtime_root}/hmac.secret" \
+  MTMPG_EXECUTOR_URL=https://executor:8443 \
+    "${ARTIFACT_ROOT}/mtmpg_executor_pg18_driver"
+
+  local active_sleep
+  active_sleep="$(psql_scalar "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE 'SELECT pg_sleep(%'")"
+  test "${active_sleep}" = "0" || fail "cancelled executor query remained active"
+
+  stop_executor
+  stop_cluster
+  assert_file_contents_absent \
+    "${runtime_root}/hmac.secret" \
+    "${executor_log}" \
+    "executor log disclosed the HMAC secret"
+  assert_file_contents_absent \
+    "${runtime_root}/signing-key.pem" \
+    "${executor_log}" \
+    "executor log disclosed the signing key"
+  assert_no_extended_match \
+    'Authorization: Bearer|postgres(ql)?://|eyJ[A-Za-z0-9_-]+\.|BEGIN (EC )?PRIVATE KEY|SELECT pg_sleep|INSERT INTO app\.executor_probe|panicked at|stack backtrace' \
+    "${executor_log}" \
+    "executor log disclosed sensitive request content"
+  assert_no_extended_match \
+    'eyJ[A-Za-z0-9_-]+\.|BEGIN (EC )?PRIVATE KEY' \
+    "${postgres_log}" \
+    "PostgreSQL log disclosed executor token material"
+
+  rm -rf "${pgdata}" "${runtime_root}" /etc/pggomtm
+  rm -f "${postgres_log}" "${executor_log}" "${PKGLIBDIR}/pggomtm.so"
+  printf 'PG18 executor OAuth and SQL integration matrix passed\n'
+}
+
+run_executor() {
+  test "$#" -eq 1 || fail "run-executor requires exactly one artifact directory"
+  ARTIFACT_ROOT="$(realpath -- "$1" 2>/dev/null)" || \
+    fail "artifact directory is unavailable"
+  test -d "${ARTIFACT_ROOT}" || fail "artifact directory is unavailable"
+  verify_executor_runtime
+  run_executor_oauth_sql_matrix
+  cleanup
+
+  local leaked_path
+  for leaked_path in \
+    /etc/pggomtm \
+    /tmp/mtmpg-executor-pgdata \
+    /tmp/mtmpg-executor-runtime; do
+    test ! -e "${leaked_path}" || fail "executor cleanup left runtime state: ${leaked_path}"
+  done
+}
+
 run_all() {
   test "$#" -eq 1 || fail "run requires exactly one artifact directory"
   ARTIFACT_ROOT="$(realpath -- "$1" 2>/dev/null)" || \
@@ -463,6 +648,11 @@ case "${1:-}" in
     require_github_actions
     shift
     run_all "$@"
+    ;;
+  run-executor)
+    require_github_actions
+    shift
+    run_executor "$@"
     ;;
   *)
     usage >&2

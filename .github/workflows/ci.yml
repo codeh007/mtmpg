@@ -50,6 +50,7 @@ jobs:
       REQUESTED_RELEASE_VERSION: ${{ inputs.release_version || '' }}
       UPLOAD_RELEASE_ARTIFACTS: ${{ inputs.upload_release_artifacts || false }}
     outputs:
+      inputs_artifact: ${{ steps.inputs-artifact.outputs.name }}
       release_artifact: ${{ steps.release-artifact.outputs.name }}
       source: ${{ github.sha }}
       version: ${{ steps.resolve.outputs.version }}
@@ -179,6 +180,21 @@ jobs:
           } >>"$GITHUB_ENV"
           echo "version=$package_version" >>"$GITHUB_OUTPUT"
 
+      - name: Name shared input artifact
+        id: inputs-artifact
+        shell: bash
+        run: echo "name=mtmpg-ci-inputs-${GITHUB_SHA}-${GITHUB_RUN_ATTEMPT}" >>"$GITHUB_OUTPUT"
+
+      - name: Upload shared resolved inputs
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.inputs-artifact.outputs.name }}
+          path: |
+            Cargo.lock
+            resolved-inputs.json
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Audit dependencies and licenses
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
@@ -199,6 +215,13 @@ jobs:
             tests/oauth_layout_probe.c \
             -o "$RUNNER_TEMP/pggomtm-oauth-layout-probe"
           "$RUNNER_TEMP/pggomtm-oauth-layout-probe"
+
+          client_include_dir="$("$PGRX_PG_CONFIG_PATH" --includedir)"
+          cc -std=c11 -Wall -Wextra -Werror \
+            -I"$client_include_dir" \
+            executor/tests/libpq_layout_probe.c \
+            -o "$RUNNER_TEMP/mtmpg-executor-libpq-layout-probe"
+          "$RUNNER_TEMP/mtmpg-executor-libpq-layout-probe"
 
       - name: Run Rust quality and domain tests
         shell: bash
@@ -307,3 +330,168 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
+
+  executor-domain:
+    name: Executor Rust domain
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      PGRX_PG_CONFIG_PATH: /usr/lib/postgresql/18/bin/pg_config
+
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download shared resolved inputs
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.verify.outputs.inputs_artifact }}
+          path: ${{ runner.temp }}/resolved-inputs
+
+      - name: Install resolved toolchain inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            clang \
+            curl \
+            gnupg \
+            jq \
+            libclang-dev \
+            libssl-dev \
+            pkg-config
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor --batch --yes \
+                --output /usr/share/keyrings/postgresql.gpg
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            postgresql-client-18 \
+            postgresql-server-dev-18
+
+          install -m 0644 \
+            "$RUNNER_TEMP/resolved-inputs/Cargo.lock" \
+            Cargo.lock
+          install -m 0644 \
+            "$RUNNER_TEMP/resolved-inputs/resolved-inputs.json" \
+            resolved-inputs.json
+          test "$(sha256sum Cargo.lock | cut -d' ' -f1)" = \
+            "$(jq --raw-output '.cargo_lock_sha256' resolved-inputs.json)"
+          test "$("$PGRX_PG_CONFIG_PATH" --version | grep --only-matching --extended-regexp '18\.[0-9]+' | head -n 1)" = \
+            "$(jq --raw-output '.postgresql.minor' resolved-inputs.json)"
+
+          rustup set profile minimal
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup component add clippy rustfmt
+          test "$(rustc --version)" = "$(jq --raw-output '.rust.compiler' resolved-inputs.json)"
+          test "$(cargo --version)" = "$(jq --raw-output '.rust.cargo' resolved-inputs.json)"
+
+      - name: Run executor RED domain gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --locked --package mtmpg-executor --all-targets -- -D warnings
+          cargo test --locked --package mtmpg-executor
+
+  executor-pg18:
+    name: Executor real PG18
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      PGRX_PG_CONFIG_PATH: /usr/lib/postgresql/18/bin/pg_config
+
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download shared resolved inputs
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.verify.outputs.inputs_artifact }}
+          path: ${{ runner.temp }}/resolved-inputs
+
+      - name: Install resolved integration inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            clang \
+            curl \
+            gnupg \
+            jq \
+            libclang-dev \
+            libkrb5-dev \
+            libssl-dev \
+            pkg-config \
+            shellcheck
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor --batch --yes \
+                --output /usr/share/keyrings/postgresql.gpg
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            postgresql-client-18 \
+            postgresql-server-dev-18
+
+          install -m 0644 \
+            "$RUNNER_TEMP/resolved-inputs/Cargo.lock" \
+            Cargo.lock
+          install -m 0644 \
+            "$RUNNER_TEMP/resolved-inputs/resolved-inputs.json" \
+            resolved-inputs.json
+          test "$(sha256sum Cargo.lock | cut -d' ' -f1)" = \
+            "$(jq --raw-output '.cargo_lock_sha256' resolved-inputs.json)"
+          test "$("$PGRX_PG_CONFIG_PATH" --version | grep --only-matching --extended-regexp '18\.[0-9]+' | head -n 1)" = \
+            "$(jq --raw-output '.postgresql.minor' resolved-inputs.json)"
+
+          rustup set profile minimal
+          rustup update stable --no-self-update
+          rustup default stable
+          test "$(rustc --version)" = "$(jq --raw-output '.rust.compiler' resolved-inputs.json)"
+          test "$(cargo --version)" = "$(jq --raw-output '.rust.cargo' resolved-inputs.json)"
+
+      - name: Stage executor integration artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          shellcheck tests/*.sh executor/tests/*.sh
+          validator_root="$RUNNER_TEMP/executor-validator"
+          install -d -m 0755 "$validator_root"
+          cargo build --locked --release --lib --no-default-features --features pg18
+          install -m 0644 \
+            "$CARGO_TARGET_DIR/release/libpggomtm.so" \
+            "$validator_root/pggomtm.so"
+          executor/tests/stage-integration.sh \
+            "$validator_root" \
+            "$CARGO_TARGET_DIR/executor-integration"
+
+      - name: Run executor RED real PG18 matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          postgres_image="$(jq --raw-output '.postgresql.runtime' resolved-inputs.json)"
+          test -n "$postgres_image"
+          PGGOMTM_POSTGRES_IMAGE="$postgres_image" \
+            tests/postgres_integration.sh \
+              run-executor \
+              "$CARGO_TARGET_DIR/executor-integration"
