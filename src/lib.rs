@@ -1,4 +1,7 @@
-#[cfg(all(feature = "pg18", any(feature = "abi-runtime-gate", feature = "pgx-oauth-gate")))]
+#[cfg(all(
+    feature = "pg18",
+    any(feature = "abi-runtime-gate", feature = "pgx-oauth-gate")
+))]
 use std::ffi::CStr;
 #[cfg(all(feature = "pg18", feature = "pgx-oauth-gate"))]
 use std::ffi::CString;
