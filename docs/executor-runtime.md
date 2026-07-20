@@ -21,7 +21,7 @@ HMAC secret必须是32个原始字节，只从只读文件加载。Service在JSO
 
 Request body只允许以下字段：
 
-- `principal`：`user_id`、恰好一个`client_id|credential_id`、`delegation_id`、`auth_method`、`authority_version`、固定`database_scope`、`profile`和`credential_expires_at`。
+- `principal`：`user_id`、恰好一个`client_id|credential_id`、`delegation_id`、`auth_method`、`authority_version`、固定`database_scope`、`profile`和必需的`credential_expires_at`字段。API key允许该字段显式为`null`，OAuth必须是正整数时间戳；字段缺失和时间戳哨兵值均非法。
 - `statement`：一个非空PostgreSQL顶层statement。
 - `binds`：`null|text|int64|boolean|json`结构化参数数组。
 - `intent`：`read|change`。

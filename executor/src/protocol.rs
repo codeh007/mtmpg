@@ -1,5 +1,5 @@
 use pggomtm::database_auth::{AuthMethod, DatabaseProfile};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use serde_json::Value;
 
 pub const MAX_REQUEST_BODY_BYTES: usize = 256 * 1024;
@@ -14,13 +14,12 @@ pub enum ProtocolError {
     ConfirmationRequired,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DelegatedPrincipal {
     pub user_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub credential_id: Option<String>,
     pub delegation_id: String,
     pub auth_method: AuthMethod,
@@ -28,6 +27,65 @@ pub struct DelegatedPrincipal {
     pub database_scope: String,
     pub profile: DatabaseProfile,
     pub credential_expires_at: Option<i64>,
+}
+
+impl<'de> Deserialize<'de> for DelegatedPrincipal {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct WireDelegatedPrincipal {
+            user_id: String,
+            #[serde(default)]
+            client_id: Option<String>,
+            #[serde(default)]
+            credential_id: Option<String>,
+            delegation_id: String,
+            auth_method: AuthMethod,
+            authority_version: u64,
+            database_scope: String,
+            profile: DatabaseProfile,
+            #[serde(default, deserialize_with = "deserialize_credential_expiry")]
+            credential_expires_at: RequiredCredentialExpiry,
+        }
+
+        let wire = WireDelegatedPrincipal::deserialize(deserializer)?;
+        let credential_expires_at = match wire.credential_expires_at {
+            RequiredCredentialExpiry::Missing => {
+                return Err(de::Error::missing_field("credential_expires_at"));
+            }
+            RequiredCredentialExpiry::Present(value) => value,
+        };
+        Ok(Self {
+            user_id: wire.user_id,
+            client_id: wire.client_id,
+            credential_id: wire.credential_id,
+            delegation_id: wire.delegation_id,
+            auth_method: wire.auth_method,
+            authority_version: wire.authority_version,
+            database_scope: wire.database_scope,
+            profile: wire.profile,
+            credential_expires_at,
+        })
+    }
+}
+
+#[derive(Default)]
+enum RequiredCredentialExpiry {
+    #[default]
+    Missing,
+    Present(Option<i64>),
+}
+
+fn deserialize_credential_expiry<'de, D>(
+    deserializer: D,
+) -> Result<RequiredCredentialExpiry, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<i64>::deserialize(deserializer).map(RequiredCredentialExpiry::Present)
 }
 
 impl DelegatedPrincipal {
