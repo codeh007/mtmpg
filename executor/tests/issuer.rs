@@ -135,7 +135,10 @@ fn non_expiring_api_key_can_issue_but_oauth_cannot_omit_expiry() {
 
     let mut oauth = principal(AuthMethod::OAuth, DatabaseProfile::Ordinary);
     oauth.credential_expires_at = None;
-    assert_eq!(issuer.issue(&oauth, NOW), Err(IssuerError::InvalidPrincipal));
+    assert_eq!(
+        issuer.issue(&oauth, NOW),
+        Err(IssuerError::InvalidPrincipal)
+    );
 }
 
 #[test]

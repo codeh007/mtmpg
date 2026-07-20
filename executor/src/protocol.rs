@@ -45,8 +45,9 @@ impl DelegatedPrincipal {
             (AuthMethod::OAuth, Some(_), None) | (AuthMethod::ApiKey, None, Some(_))
         );
         let credential_expiry_matches = match (self.auth_method, self.credential_expires_at) {
-            (AuthMethod::OAuth, Some(expires_at))
-            | (AuthMethod::ApiKey, Some(expires_at)) => expires_at > 0,
+            (AuthMethod::OAuth, Some(expires_at)) | (AuthMethod::ApiKey, Some(expires_at)) => {
+                expires_at > 0
+            }
             (AuthMethod::ApiKey, None) => true,
             (AuthMethod::OAuth, None) => false,
         };
