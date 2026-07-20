@@ -23,13 +23,17 @@ PR、`main`与executor release SHALL复用仓库标准只读CI，一次解析Rus
 - **THEN** CI SHALL失败并阻止全部executor发布
 
 ### Requirement: Executor release必须使用独立不可变版本身份
-Executor SHALL使用自身Cargo package version、annotated `executor-v<semver>` tag、`ghcr.io/codeh007/mtmpg-executor:<semver>` image和独立GitHub Release。Tag version MUST与executor package精确一致，且 MUST NOT触发、移动、覆盖或更新validator的`v<semver>` tag、`ghcr.io/codeh007/mtmpg:<semver>`、Release或`latest`。初始stable SHALL为`executor-v0.1.0`。
+Executor SHALL使用自身Cargo package version、annotated `executor-v<semver>` tag、`ghcr.io/codeh007/mtmpg-executor:<semver>` image和独立GitHub Release。Tag version MUST与executor package精确一致，且 MUST NOT触发、移动、覆盖或更新validator的`v<semver>` tag、`ghcr.io/codeh007/mtmpg:<semver>`、Release或`latest`。初始`executor-v0.1.0`历史身份 SHALL保持不可变；若该发布因供应链材料不完整而不可消费，修复 SHALL递增patch并使用新的tag、image与Release，当前前向修复目标为`executor-v0.1.1`。
 
-只读CI SHALL从tag精确source物化一次已验证executor OCI archive；最小写权限publish job SHALL只推送该archive并生成manifest、checksums、Cargo.lock、resolved inputs、SPDX SBOM、provenance和GitHub attestation，不得重新resolve、Cargo build或Docker build。Gomtmui SHALL只消费明确SemVer和匹配resolved digest，不使用executor `latest`或本地fallback。
+只读CI SHALL从tag精确source物化一次已验证executor OCI archive；最小写权限publish job SHALL只推送该archive并生成manifest、checksums、Cargo.lock、resolved inputs、SPDX SBOM、provenance和GitHub attestation，不得重新resolve、Cargo build或Docker build。全部Release附件 MUST在draft状态上传并核验，随后同一Release才可发布并冻结；正式发布后 MUST NOT再上传或替换附件。Gomtmui SHALL只消费明确SemVer和匹配resolved digest，不使用executor `latest`或本地fallback。
 
-#### Scenario: 发布executor stable
-- **WHEN** annotated `executor-v0.1.0`指向main ancestry、version匹配且全部门禁通过
-- **THEN** workflow SHALL一次发布`mtmpg-executor:0.1.0`及独立Release/供应链材料，validator v0.2.0身份保持不变
+#### Scenario: 前向发布可消费的executor stable
+- **WHEN** `executor-v0.1.0`已是不可变但无附件的失败历史，且annotated `executor-v0.1.1`指向精确main GREEN ancestry、version匹配、目标身份不存在并且全部门禁通过
+- **THEN** workflow SHALL一次发布`mtmpg-executor:0.1.1`及具有完整附件的独立immutable Release，validator v0.2.0 tag、image、Release与latest身份保持不变
+
+#### Scenario: Draft附件上传失败
+- **WHEN** 任一manifest、checksums、Cargo.lock、resolved inputs、SBOM、provenance或attestation在draft阶段缺失或核验失败
+- **THEN** workflow SHALL不得发布或冻结该Release，也不得把不完整身份交给消费者
 
 #### Scenario: 目标version已存在
 - **WHEN** tag、GHCR version或GitHub Release任一目标身份已经存在或材料不一致
