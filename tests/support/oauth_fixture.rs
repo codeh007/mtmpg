@@ -107,7 +107,11 @@ fn generate_fixtures(output_dir: &Path) -> Result<(), Box<dyn Error>> {
     )?;
 
     for (scenario, profile, role) in [
-        ("oauth-v1-profile", "business-admin", "gomtm_candidate_business_admin"),
+        (
+            "oauth-v1-profile",
+            "business-admin",
+            "gomtm_candidate_business_admin",
+        ),
         ("oauth-project-role", "ordinary", "gomtm_ordinary"),
         ("oauth-stage-role", "ordinary", "gomtm_candidate_ordinary"),
     ] {

@@ -7,7 +7,7 @@
 
 - [x] 2.1 更新Rust JWT、profile-role、identity与ABI领域测试及共享OAuth fixture，使其要求三个v2下划线名称和`pggomtm:v2`
 - [x] 2.2 更新真实PG18与final-image最小行为测试，覆盖v2同名startup role并拒绝v1、项目前缀和阶段前缀名称
-- [ ] 2.3 对测试先行改动执行静态检查，提交并推送仅含测试与fixture的RED commit到`main`
+- [x] 2.3 对测试先行改动执行静态检查，提交并推送仅含测试与fixture的RED commit到`main`
 - [ ] 2.4 核验RED commit精确SHA的GitHub Actions因旧production契约产生预期失败，并记录run证据
 
 ## 3. Contract v2实现与GREEN
@@ -28,3 +28,4 @@
 ## 验证证据
 
 - 规划基线：`b0c013e5a1500d9373434579fb704f861ffd6c3d`
+- RED候选（rustfmt失败，不计有效RED）：`7cfc65299748af58fb46dd54afc2d5c767708969`，run `29714642271`
