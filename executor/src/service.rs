@@ -245,6 +245,7 @@ fn issuer_error(error: IssuerError, correlation_id: &str) -> Response {
 }
 
 fn database_error(error: DatabaseError, correlation_id: &str) -> Response {
+    eprintln!("executor request failed: {}", error.stage.code());
     let (status, category) = match error.kind {
         DatabaseErrorKind::InvalidRequest => (StatusCode::BAD_REQUEST, "invalid_request"),
         DatabaseErrorKind::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, "unavailable"),

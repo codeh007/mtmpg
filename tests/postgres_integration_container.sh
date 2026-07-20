@@ -590,10 +590,27 @@ run_executor_oauth_sql_matrix() {
     done
     fail "executor service exited before readiness"
   fi
-  MTMPG_EXECUTOR_CA_PATH="${runtime_root}/ca.crt" \
-  MTMPG_EXECUTOR_HMAC_PATH="${runtime_root}/hmac.secret" \
-  MTMPG_EXECUTOR_URL=https://executor:8443 \
-    "${ARTIFACT_ROOT}/mtmpg_executor_pg18_driver"
+  if ! MTMPG_EXECUTOR_CA_PATH="${runtime_root}/ca.crt" \
+    MTMPG_EXECUTOR_HMAC_PATH="${runtime_root}/hmac.secret" \
+    MTMPG_EXECUTOR_URL=https://executor:8443 \
+    "${ARTIFACT_ROOT}/mtmpg_executor_pg18_driver"; then
+    local request_stage
+    for request_stage in \
+      client \
+      connect \
+      begin \
+      lock_budget \
+      statement_budget \
+      transaction_budget \
+      statement \
+      result \
+      commit; do
+      if grep --quiet "^executor request failed: ${request_stage}$" "${executor_log}"; then
+        fail "executor request failed during ${request_stage}"
+      fi
+    done
+    fail "executor request matrix failed without a classified stage"
+  fi
 
   local active_sleep
   active_sleep="$(psql_scalar "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE 'SELECT pg_sleep(%'")"

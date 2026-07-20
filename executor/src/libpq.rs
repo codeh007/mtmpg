@@ -82,10 +82,41 @@ pub enum DatabaseErrorKind {
     DeadlineExceeded,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DatabaseStage {
+    Client,
+    Connect,
+    Begin,
+    LockBudget,
+    StatementBudget,
+    TransactionBudget,
+    Statement,
+    Result,
+    Commit,
+}
+
+impl DatabaseStage {
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Client => "client",
+            Self::Connect => "connect",
+            Self::Begin => "begin",
+            Self::LockBudget => "lock_budget",
+            Self::StatementBudget => "statement_budget",
+            Self::TransactionBudget => "transaction_budget",
+            Self::Statement => "statement",
+            Self::Result => "result",
+            Self::Commit => "commit",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DatabaseError {
     pub kind: DatabaseErrorKind,
     pub sqlstate_class: Option<String>,
+    pub stage: DatabaseStage,
 }
 
 impl DatabaseError {
@@ -93,6 +124,7 @@ impl DatabaseError {
         Self {
             kind,
             sqlstate_class: None,
+            stage: DatabaseStage::Client,
         }
     }
 
@@ -103,7 +135,13 @@ impl DatabaseError {
         Self {
             kind: DatabaseErrorKind::Rejected,
             sqlstate_class: sqlstate,
+            stage: DatabaseStage::Client,
         }
+    }
+
+    fn at_stage(mut self, stage: DatabaseStage) -> Self {
+        self.stage = stage;
+        self
     }
 }
 
@@ -248,39 +286,49 @@ pub fn execute(
         token,
         deadline,
         cancellation,
-    )?;
+    )
+    .map_err(|error| error.at_stage(DatabaseStage::Connect))?;
     let started = Instant::now();
 
     let begin = match request.intent {
         ExecutionIntent::Read => "BEGIN READ ONLY",
         ExecutionIntent::Change => "BEGIN",
     };
-    connection.control(begin, deadline, cancellation)?;
-    connection.control("SET LOCAL lock_timeout = '250ms'", deadline, cancellation)?;
+    connection
+        .control(begin, deadline, cancellation)
+        .map_err(|error| error.at_stage(DatabaseStage::Begin))?;
+    connection
+        .control("SET LOCAL lock_timeout = '250ms'", deadline, cancellation)
+        .map_err(|error| error.at_stage(DatabaseStage::LockBudget))?;
     connection.control(
         "SET LOCAL statement_timeout = '750ms'",
         deadline,
         cancellation,
-    )?;
-    connection.control(
-        "SET LOCAL idle_in_transaction_session_timeout = '1500ms'",
-        deadline,
-        cancellation,
-    )?;
+    )
+    .map_err(|error| error.at_stage(DatabaseStage::StatementBudget))?;
+    connection
+        .control(
+            "SET LOCAL idle_in_transaction_session_timeout = '1500ms'",
+            deadline,
+            cancellation,
+        )
+        .map_err(|error| error.at_stage(DatabaseStage::TransactionBudget))?;
 
     let outcome = match connection.query(&request.statement, &request.binds, deadline, cancellation)
     {
         Ok(outcome) => outcome,
         Err(error) => {
             connection.rollback_best_effort();
-            return Err(error);
+            return Err(error.at_stage(DatabaseStage::Statement));
         }
     };
     // SAFETY: the connection is live; a successful user statement must leave our transaction open.
     if unsafe { ffi::PQtransactionStatus(connection.raw) }
         != ffi::PGTransactionStatusType_PQTRANS_INTRANS
     {
-        return Err(DatabaseError::new(DatabaseErrorKind::Rejected));
+        return Err(
+            DatabaseError::new(DatabaseErrorKind::Rejected).at_stage(DatabaseStage::Statement)
+        );
     }
     let result = ExecutionResult {
         columns: outcome.columns,
@@ -291,14 +339,18 @@ pub fn execute(
         correlation_id: request.correlation_id.clone(),
     };
     let encoded = serde_json::to_vec(&result)
-        .map_err(|_| DatabaseError::new(DatabaseErrorKind::Unavailable))?;
+        .map_err(|_| {
+            DatabaseError::new(DatabaseErrorKind::Unavailable).at_stage(DatabaseStage::Result)
+        })?;
     if encoded.len() > MAX_RESULT_BYTES {
         connection.rollback_best_effort();
-        return Err(DatabaseError::new(DatabaseErrorKind::BudgetExceeded));
+        return Err(
+            DatabaseError::new(DatabaseErrorKind::BudgetExceeded).at_stage(DatabaseStage::Result)
+        );
     }
     if let Err(error) = connection.control("COMMIT", deadline, cancellation) {
         connection.rollback_best_effort();
-        return Err(error);
+        return Err(error.at_stage(DatabaseStage::Commit));
     }
     Ok(result)
 }
