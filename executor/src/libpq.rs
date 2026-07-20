@@ -159,9 +159,7 @@ pub enum AuthHookError {
 
 static AUTH_TOKENS: OnceLock<Arc<ConnectionTokenRegistry>> = OnceLock::new();
 
-pub fn install_auth_data_hook(
-    registry: Arc<ConnectionTokenRegistry>,
-) -> Result<(), AuthHookError> {
+pub fn install_auth_data_hook(registry: Arc<ConnectionTokenRegistry>) -> Result<(), AuthHookError> {
     current_client_abi().map_err(|_| AuthHookError::InvalidClientAbi)?;
     AUTH_TOKENS
         .set(registry)
@@ -258,11 +256,7 @@ pub fn execute(
         ExecutionIntent::Change => "BEGIN",
     };
     connection.control(begin, deadline, cancellation)?;
-    connection.control(
-        "SET LOCAL lock_timeout = '250ms'",
-        deadline,
-        cancellation,
-    )?;
+    connection.control("SET LOCAL lock_timeout = '250ms'", deadline, cancellation)?;
     connection.control(
         "SET LOCAL statement_timeout = '750ms'",
         deadline,
@@ -274,12 +268,8 @@ pub fn execute(
         cancellation,
     )?;
 
-    let outcome = match connection.query(
-        &request.statement,
-        &request.binds,
-        deadline,
-        cancellation,
-    ) {
+    let outcome = match connection.query(&request.statement, &request.binds, deadline, cancellation)
+    {
         Ok(outcome) => outcome,
         Err(error) => {
             connection.rollback_best_effort();
@@ -359,9 +349,8 @@ impl PgConnection {
         value_pointers.push(ptr::null());
 
         // SAFETY: both arrays are NULL-terminated and their CStrings outlive the call.
-        let raw = unsafe {
-            ffi::PQconnectStartParams(key_pointers.as_ptr(), value_pointers.as_ptr(), 0)
-        };
+        let raw =
+            unsafe { ffi::PQconnectStartParams(key_pointers.as_ptr(), value_pointers.as_ptr(), 0) };
         if raw.is_null() {
             return Err(DatabaseError::new(DatabaseErrorKind::Unavailable));
         }
@@ -468,11 +457,7 @@ impl PgConnection {
         Ok(outcome)
     }
 
-    fn flush(
-        &self,
-        deadline: Instant,
-        cancellation: &Cancellation,
-    ) -> Result<(), DatabaseError> {
+    fn flush(&self, deadline: Instant, cancellation: &Cancellation) -> Result<(), DatabaseError> {
         loop {
             operation_allowed(deadline, cancellation).inspect_err(|_| self.cancel_query())?;
             // SAFETY: the connection is live and exclusively owned.
@@ -521,12 +506,7 @@ impl PgConnection {
         let poll_deadline = now.saturating_add(POLL_SLICE_MICROSECONDS);
         // SAFETY: socket belongs to the live connection and the deadline uses libpq's clock.
         let result = unsafe {
-            ffi::PQsocketPoll(
-                socket,
-                c_int::from(read),
-                c_int::from(write),
-                poll_deadline,
-            )
+            ffi::PQsocketPoll(socket, c_int::from(read), c_int::from(write), poll_deadline)
         };
         if result < 0 {
             return Err(DatabaseError::new(DatabaseErrorKind::Unavailable));
@@ -581,10 +561,11 @@ impl EncodedBinds {
                 BindValue::Text(value) => Some(c_string(value)?),
                 BindValue::Int64(value) => Some(c_string(&value.to_string())?),
                 BindValue::Boolean(value) => Some(c_string(if *value { "true" } else { "false" })?),
-                BindValue::Json(value) => Some(c_string(
-                    &serde_json::to_string(value)
-                        .map_err(|_| DatabaseError::new(DatabaseErrorKind::InvalidRequest))?,
-                )?),
+                BindValue::Json(value) => {
+                    Some(c_string(&serde_json::to_string(value).map_err(|_| {
+                        DatabaseError::new(DatabaseErrorKind::InvalidRequest)
+                    })?)?)
+                }
             };
             storage.push(encoded);
         }
@@ -655,10 +636,9 @@ impl ResultOwner {
                     continue;
                 }
                 // SAFETY: both indexes are inside the result bounds.
-                let length = usize::try_from(unsafe {
-                    ffi::PQgetlength(self.0, row_index, column_index)
-                })
-                .map_err(|_| DatabaseError::new(DatabaseErrorKind::Unavailable))?;
+                let length =
+                    usize::try_from(unsafe { ffi::PQgetlength(self.0, row_index, column_index) })
+                        .map_err(|_| DatabaseError::new(DatabaseErrorKind::Unavailable))?;
                 if length > MAX_RESULT_VALUE_BYTES {
                     return Err(DatabaseError::new(DatabaseErrorKind::BudgetExceeded));
                 }
@@ -707,10 +687,7 @@ impl ResultOwner {
     fn sqlstate_class(&self) -> Option<String> {
         // SAFETY: self owns a live result; NULL indicates no SQLSTATE.
         let field = unsafe {
-            ffi::PQresultErrorField(
-                self.0,
-                c_int::try_from(ffi::PG_DIAG_SQLSTATE).ok()?,
-            )
+            ffi::PQresultErrorField(self.0, c_int::try_from(ffi::PG_DIAG_SQLSTATE).ok()?)
         };
         if field.is_null() {
             return None;
@@ -743,10 +720,7 @@ unsafe fn c_string_from_libpq(pointer: *const c_char) -> Result<String, Database
         .map_err(|_| DatabaseError::new(DatabaseErrorKind::Unavailable))
 }
 
-fn operation_allowed(
-    deadline: Instant,
-    cancellation: &Cancellation,
-) -> Result<(), DatabaseError> {
+fn operation_allowed(deadline: Instant, cancellation: &Cancellation) -> Result<(), DatabaseError> {
     if cancellation.is_cancelled() || Instant::now() >= deadline {
         return Err(DatabaseError::new(DatabaseErrorKind::DeadlineExceeded));
     }

@@ -58,12 +58,10 @@ fn generate_bindings() -> BuildResult<()> {
         .clang_arg(format!("-I{include_dir}"))
         .allowlist_function(LIBPQ_FUNCTIONS)
         .allowlist_type(LIBPQ_TYPES)
-        .allowlist_var(
-            concat!(
-                "^(CONNECTION_|PGRES_|PG_DIAG_SQLSTATE$|PQAUTHDATA_|PQERRORS_|",
-                "PQSHOW_CONTEXT_|PQTRANS_).*$"
-            ),
-        )
+        .allowlist_var(concat!(
+            "^(CONNECTION_|PGRES_|PG_DIAG_SQLSTATE$|PQAUTHDATA_|PQERRORS_|",
+            "PQSHOW_CONTEXT_|PQTRANS_).*$"
+        ))
         .allowlist_recursively(false)
         .generate_comments(false)
         .layout_tests(false)

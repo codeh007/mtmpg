@@ -225,12 +225,8 @@ fn database_error(error: DatabaseError, correlation_id: &str) -> Response {
         DatabaseErrorKind::InvalidRequest => (StatusCode::BAD_REQUEST, "invalid_request"),
         DatabaseErrorKind::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, "unavailable"),
         DatabaseErrorKind::Rejected => (StatusCode::UNPROCESSABLE_ENTITY, "database_rejected"),
-        DatabaseErrorKind::BudgetExceeded => {
-            (StatusCode::PAYLOAD_TOO_LARGE, "budget_exceeded")
-        }
-        DatabaseErrorKind::DeadlineExceeded => {
-            (StatusCode::GATEWAY_TIMEOUT, "deadline_exceeded")
-        }
+        DatabaseErrorKind::BudgetExceeded => (StatusCode::PAYLOAD_TOO_LARGE, "budget_exceeded"),
+        DatabaseErrorKind::DeadlineExceeded => (StatusCode::GATEWAY_TIMEOUT, "deadline_exceeded"),
     };
     let error = ErrorBody {
         category,
