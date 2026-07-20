@@ -6,10 +6,10 @@
 
 ## 2. 建立有效RED证据
 
-- [ ] 2.1 先写Rust HMAC envelope、strict request/response、replay、body/bind边界和30秒ES256 issuer测试，覆盖未知字段、外部credential、role/claims覆盖及credential临期拒绝
-- [ ] 2.2 先写当前PG18 libpq binding/layout与`PGconn*` token registry测试，覆盖一次取用、未知/重复/失败清理和不同principal并发隔离
-- [ ] 2.3 先写真实PG18 executor harness，覆盖TLS/OAuth、空bind/参数bind、multi-statement拒绝、CTE/`CALL`/`DO`、read-only/change、rollback、budget与cancel
-- [ ] 2.4 将只含RED测试/fixture/必要scaffold的精确SHA非force推送`main`，取得因缺少executor生产实现而失败、但既有validator门禁不回归的GitHub Actions run并记录脱敏证据
+- [x] 2.1 先写Rust HMAC envelope、strict request/response、replay、body/bind边界和30秒ES256 issuer测试，覆盖未知字段、外部credential、role/claims覆盖及credential临期拒绝
+- [x] 2.2 先写当前PG18 libpq binding/layout与`PGconn*` token registry测试，覆盖一次取用、未知/重复/失败清理和不同principal并发隔离
+- [x] 2.3 先写真实PG18 executor harness，覆盖TLS/OAuth、空bind/参数bind、multi-statement拒绝、CTE/`CALL`/`DO`、read-only/change、rollback、budget与cancel
+- [x] 2.4 将只含RED测试/fixture/必要scaffold的精确SHA非force推送`main`，取得因缺少executor生产实现而失败、但既有validator门禁不回归的GitHub Actions run并记录脱敏证据
 
 ## 3. 实现HMAC、协议与issuer
 
