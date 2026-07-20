@@ -200,6 +200,14 @@ verify_executor_runtime() {
     "${ARTIFACT_ROOT}/mtmpg-executor" \
     "${ARTIFACT_ROOT}/mtmpg_executor_fixture" \
     "${ARTIFACT_ROOT}/mtmpg_executor_pg18_driver"
+
+  local executor_linkage
+  if ! executor_linkage="$(ldd "${ARTIFACT_ROOT}/mtmpg-executor" 2>&1)"; then
+    fail "executor binary is incompatible with the PG18 runtime"
+  fi
+  if grep --quiet 'not found' <<<"${executor_linkage}"; then
+    fail "executor binary is incompatible with the PG18 runtime"
+  fi
 }
 
 install_module() {
