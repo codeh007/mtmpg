@@ -277,7 +277,7 @@ run_oauth_gate_matrix() {
     --auth-local=trust \
     --auth-host=reject >/dev/null
   sed -i \
-    '1ilocal all gomtm_candidate_ordinary oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm_pgx_gate delegate_ident_mapping=1' \
+    '1ilocal all ordinary oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm_pgx_gate delegate_ident_mapping=1' \
     "${pgdata}/pg_hba.conf"
   ACTIVE_PGDATA="${pgdata}"
   gosu postgres pg_ctl \
@@ -286,12 +286,12 @@ run_oauth_gate_matrix() {
     --options="-c listen_addresses='' -k /tmp -c oauth_validator_libraries=pggomtm_pgx_gate" \
     --wait start >/dev/null
 
-  psql_command 'CREATE ROLE gomtm_candidate_ordinary LOGIN'
+  psql_command 'CREATE ROLE ordinary LOGIN'
   generate_fixtures "${fixture_root}"
   "${ARTIFACT_ROOT}/pggomtm_oauth_smoke_client" \
     --expect-allowed \
     "${fixture_root}/oauth-ordinary.jwt" \
-    gomtm_candidate_ordinary \
+    ordinary \
     "${fixture_root}/oauth-ordinary.system-user"
   "${ARTIFACT_ROOT}/pggomtm_oauth_smoke_fixture" \
     verify-system-user \
@@ -300,7 +300,7 @@ run_oauth_gate_matrix() {
   "${ARTIFACT_ROOT}/pggomtm_oauth_smoke_client" \
     --expect-rejected \
     "${fixture_root}/tampered.jwt" \
-    gomtm_candidate_ordinary
+    ordinary
   stop_cluster
 
   rm -rf "${pgdata}" "${log_file}" "${fixture_root}" "${ldd_output}"
@@ -388,10 +388,19 @@ run_production_backend_smoke() {
     --auth-local=trust \
     --auth-host=reject >/dev/null
   sed -i \
-    '1ilocal all gomtm_candidate_ordinary oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm delegate_ident_mapping=1' \
+    '1ilocal all ordinary oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm delegate_ident_mapping=1' \
+    "${pgdata}/pg_hba.conf"
+  sed -i \
+    '1ilocal all business_admin oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm delegate_ident_mapping=1' \
     "${pgdata}/pg_hba.conf"
   sed -i \
     '1ilocal all gomtm_candidate_business_admin oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm delegate_ident_mapping=1' \
+    "${pgdata}/pg_hba.conf"
+  sed -i \
+    '1ilocal all gomtm_candidate_ordinary oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm delegate_ident_mapping=1' \
+    "${pgdata}/pg_hba.conf"
+  sed -i \
+    '1ilocal all gomtm_ordinary oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm delegate_ident_mapping=1' \
     "${pgdata}/pg_hba.conf"
   ACTIVE_PGDATA="${pgdata}"
   gosu postgres pg_ctl \
@@ -401,17 +410,20 @@ run_production_backend_smoke() {
     --wait start >/dev/null
 
   psql_command \
-    'CREATE ROLE gomtm_candidate_ordinary LOGIN; CREATE ROLE gomtm_candidate_business_admin LOGIN'
+    'CREATE ROLE ordinary LOGIN; CREATE ROLE business_admin LOGIN; CREATE ROLE gomtm_candidate_ordinary LOGIN; CREATE ROLE gomtm_candidate_business_admin LOGIN; CREATE ROLE gomtm_ordinary LOGIN'
   generate_fixtures "${fixture_root}"
   "${ARTIFACT_ROOT}/pggomtm_oauth_smoke_client" \
     --expect-startup-rejected \
     "${fixture_root}/oauth-ordinary.jwt" \
-    gomtm_candidate_ordinary
+    ordinary
   install_runtime_config
 
-  expect_allowed "${fixture_root}" oauth-ordinary gomtm_candidate_ordinary
-  expect_rejected "${fixture_root}" oauth-ordinary gomtm_candidate_business_admin
-  expect_rejected "${fixture_root}" tampered gomtm_candidate_ordinary
+  expect_allowed "${fixture_root}" oauth-ordinary ordinary
+  expect_rejected "${fixture_root}" oauth-ordinary business_admin
+  expect_rejected "${fixture_root}" tampered ordinary
+  expect_rejected "${fixture_root}" oauth-v1-profile gomtm_candidate_business_admin
+  expect_rejected "${fixture_root}" oauth-project-role gomtm_ordinary
+  expect_rejected "${fixture_root}" oauth-stage-role gomtm_candidate_ordinary
 
   stop_cluster
   verify_production_log "${log_file}" "${fixture_root}"

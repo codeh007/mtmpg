@@ -218,8 +218,8 @@ verify_authenticated_session(PGconn *conn, const char *expected_role,
 	if (result == NULL || PQresultStatus(result) != PGRES_TUPLES_OK ||
 		PQntuples(result) != 1 || PQnfields(result) != 3 ||
 		PQgetisnull(result, 0, 0) ||
-		strncmp(PQgetvalue(result, 0, 0), "oauth:pggomtm:v1;",
-				strlen("oauth:pggomtm:v1;")) != 0 ||
+		strncmp(PQgetvalue(result, 0, 0), "oauth:pggomtm:v2;",
+				strlen("oauth:pggomtm:v2;")) != 0 ||
 		strcmp(PQgetvalue(result, 0, 1), expected_role) != 0 ||
 		strncmp(PQgetvalue(result, 0, 2), "18", 2) != 0)
 	{

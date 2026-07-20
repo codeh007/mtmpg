@@ -12,6 +12,8 @@ use pggomtm::database_auth::{
     AuthMethod, AuthenticatedActor, AuthenticatedIdentity, DatabaseProfile, DatabaseTokenClaims,
     MAX_AUTHN_ID_BYTES, decode_system_user,
 };
+use serde::Serialize;
+use serde_json::Value;
 
 const ISSUER: &str = "https://candidate.example.test/oauth/database";
 const AUDIENCE: &str = "https://candidate.example.test/resources/database/gomtm-test";
@@ -104,6 +106,18 @@ fn generate_fixtures(output_dir: &Path) -> Result<(), Box<dyn Error>> {
         ordinary_oauth_token.as_bytes(),
     )?;
 
+    for (scenario, profile, role) in [
+        ("oauth-v1-profile", "business-admin", "gomtm_candidate_business_admin"),
+        ("oauth-project-role", "ordinary", "gomtm_ordinary"),
+        ("oauth-stage-role", "ordinary", "gomtm_candidate_ordinary"),
+    ] {
+        let token = sign_named_claims(now, profile, role, &key)?;
+        write_ephemeral_fixture(
+            &output_dir.join(format!("{scenario}.jwt")),
+            token.as_bytes(),
+        )?;
+    }
+
     let mut tampered = ordinary_oauth_token.into_bytes();
     let signature_start = tampered
         .iter()
@@ -123,7 +137,22 @@ fn generate_fixtures(output_dir: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn sign_claims(claims: DatabaseTokenClaims, key: &SigningKey) -> Result<String, Box<dyn Error>> {
+fn sign_named_claims(
+    now: i64,
+    profile: &str,
+    role: &str,
+    key: &SigningKey,
+) -> Result<String, Box<dyn Error>> {
+    let mut claims = serde_json::to_value(ordinary_claims(now))?;
+    let object = claims
+        .as_object_mut()
+        .ok_or_else(|| invalid_input("database claims must be a JSON object"))?;
+    object.insert("db_profile".into(), Value::String(profile.into()));
+    object.insert("db_role".into(), Value::String(role.into()));
+    sign_claims(claims, key)
+}
+
+fn sign_claims(claims: impl Serialize, key: &SigningKey) -> Result<String, Box<dyn Error>> {
     let mut token = Token::compact((), claims);
     *token.header_mut().key_id() = Some(KID.into());
     *token.header_mut().r#type() = Some("JWT".into());

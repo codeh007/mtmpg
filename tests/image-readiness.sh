@@ -99,11 +99,11 @@ cat >"${SESSION_ROOT}/init.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 psql --host="$PGHOST" --set ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'SQL'
-CREATE ROLE gomtm_candidate_ordinary LOGIN;
+CREATE ROLE ordinary LOGIN;
 SQL
 cat >"$PGDATA/pg_hba.conf" <<'HBA'
 local all postgres trust
-local all gomtm_candidate_ordinary oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm delegate_ident_mapping=1
+local all ordinary oauth issuer="https://candidate.example.test/oauth/database" scope="database" validator=pggomtm delegate_ident_mapping=1
 local all all reject
 HBA
 EOF
@@ -149,7 +149,7 @@ test "$(
   /test-artifacts/pggomtm_oauth_smoke_client \
   --expect-allowed \
   /fixtures/oauth-ordinary.jwt \
-  gomtm_candidate_ordinary \
+  ordinary \
   /fixtures/oauth-ordinary.system-user
 "${DOCKER_BIN}" exec "${RUNTIME_CONTAINER}" \
   /test-artifacts/pggomtm_oauth_smoke_fixture \
@@ -160,7 +160,7 @@ test "$(
   /test-artifacts/pggomtm_oauth_smoke_client \
   --expect-rejected \
   /fixtures/tampered.jwt \
-  gomtm_candidate_ordinary
+  ordinary
 
 "${DOCKER_BIN}" stop --time 10 "${RUNTIME_CONTAINER}" >/dev/null
 "${DOCKER_BIN}" rm "${RUNTIME_CONTAINER}" >/dev/null

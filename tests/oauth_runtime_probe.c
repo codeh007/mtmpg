@@ -114,7 +114,7 @@ expect_validate_error(const OAuthValidatorCallbacks *callbacks,
 	{
 		(void) callbacks->validate_cb(state,
 								  "pggomtm-abi-error",
-								  "gomtm_candidate_ordinary",
+								  "ordinary",
 								  &result);
 	}
 	PG_CATCH();
@@ -220,7 +220,7 @@ pggomtm_abi_runtime_probe(PG_FUNCTION_ARGS)
 
 	if (!callbacks->validate_cb(&state,
 							 "header.payload.signature",
-							 "gomtm_candidate_ordinary",
+							 "ordinary",
 							 &result) ||
 		result.authorized || result.authn_id != NULL)
 		ereport(ERROR,
@@ -230,7 +230,7 @@ pggomtm_abi_runtime_probe(PG_FUNCTION_ARGS)
 	result.authn_id = (char *) 1;
 	if (callbacks->validate_cb(NULL,
 							"header.payload.signature",
-							"gomtm_candidate_ordinary",
+							"ordinary",
 							&result) ||
 		result.authorized || result.authn_id != NULL)
 		ereport(ERROR,
@@ -239,7 +239,7 @@ pggomtm_abi_runtime_probe(PG_FUNCTION_ARGS)
 	result.authorized = true;
 	result.authn_id = (char *) 1;
 	if (callbacks->validate_cb(&state, NULL,
-							"gomtm_candidate_ordinary", &result) ||
+							"ordinary", &result) ||
 		result.authorized || result.authn_id != NULL)
 		ereport(ERROR,
 				(errmsg("pggomtm ABI gate accepted a null token")));
@@ -254,7 +254,7 @@ pggomtm_abi_runtime_probe(PG_FUNCTION_ARGS)
 
 	if (callbacks->validate_cb(&state,
 							"header.payload.signature",
-							"gomtm_candidate_ordinary",
+							"ordinary",
 							NULL))
 		ereport(ERROR,
 				(errmsg("pggomtm ABI gate accepted a null validate result")));
@@ -262,7 +262,7 @@ pggomtm_abi_runtime_probe(PG_FUNCTION_ARGS)
 	memset(&result, 0, sizeof(result));
 	if (!callbacks->validate_cb(&state,
 							 "pggomtm-abi-allocator",
-							 "gomtm_candidate_ordinary",
+							 "ordinary",
 							 &result) ||
 		result.authorized || result.authn_id == NULL ||
 		strcmp(result.authn_id, "pggomtm-abi-allocator") != 0)
@@ -274,7 +274,7 @@ pggomtm_abi_runtime_probe(PG_FUNCTION_ARGS)
 	result.authn_id = (char *) 1;
 	if (callbacks->validate_cb(&state,
 							"pggomtm-abi-panic",
-							"gomtm_candidate_ordinary",
+							"ordinary",
 							&result) ||
 		result.authorized || result.authn_id != NULL)
 		ereport(ERROR,

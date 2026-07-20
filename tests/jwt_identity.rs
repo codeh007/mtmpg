@@ -130,6 +130,7 @@ fn valid_es256_oauth_token_round_trips_versioned_identity() {
         decode_system_user(&format!("oauth:{}", verified.authn_id)),
         Ok(verified.identity)
     );
+    assert!(verified.authn_id.starts_with("pggomtm:v2;"));
     assert!(verified.authn_id.len() <= MAX_AUTHN_ID_BYTES);
 }
 
@@ -574,11 +575,12 @@ fn identity_codec_rejects_ambiguity_unknown_versions_and_oversize_values() {
     };
     let encoded = identity.encode_authn_id().expect("encode identity");
 
+    assert!(encoded.starts_with("pggomtm:v2;"));
     assert_eq!(decode_authn_id(&encoded), Ok(identity.clone()));
     let system_user = format!("oauth:{encoded}");
     assert_eq!(decode_system_user(&system_user), Ok(identity));
-    assert!(decode_system_user(&system_user.replacen("pggomtm:v1", "pggomtm:v2", 1)).is_err());
-    assert!(decode_authn_id("pggomtm:v1:u=x;actor=client:y").is_err());
+    assert!(decode_system_user(&system_user.replacen("pggomtm:v2", "pggomtm:v1", 1)).is_err());
+    assert!(decode_authn_id(&encoded.replacen("p=ordinary", "p=business-admin", 1)).is_err());
     assert!(decode_system_user(&format!("scram:{}", encoded)).is_err());
     assert!(decode_authn_id(&"x".repeat(MAX_AUTHN_ID_BYTES + 1)).is_err());
     assert!(decode_system_user(&format!("oauth:{}", "x".repeat(MAX_AUTHN_ID_BYTES + 1))).is_err());
@@ -587,19 +589,65 @@ fn identity_codec_rejects_ambiguity_unknown_versions_and_oversize_values() {
 #[test]
 fn profile_role_mapping_is_closed_and_non_inheriting() {
     let mappings = BTreeMap::from([
-        (DatabaseProfile::Ordinary, "gomtm_candidate_ordinary"),
-        (
-            DatabaseProfile::BusinessAdmin,
-            "gomtm_candidate_business_admin",
-        ),
-        (
-            DatabaseProfile::DatabaseDeveloper,
-            "gomtm_candidate_database_developer",
-        ),
+        (DatabaseProfile::Ordinary, "ordinary"),
+        (DatabaseProfile::BusinessAdmin, "business_admin"),
+        (DatabaseProfile::DatabaseDeveloper, "database_developer"),
     ]);
 
-    for (profile, role) in mappings {
-        assert_eq!(profile.database_role(), role);
+    for (profile, canonical_name) in mappings {
+        assert_eq!(profile.database_role(), canonical_name);
+        assert_eq!(
+            serde_json::to_value(profile).expect("serialize profile"),
+            json!(canonical_name)
+        );
+        let identity = AuthenticatedIdentity {
+            user_id: "usr_profile_mapping".into(),
+            actor: AuthenticatedActor::OAuthClient("cli_profile_mapping".into()),
+            delegation_id: "dlg_profile_mapping".into(),
+            auth_method: AuthMethod::OAuth,
+            authority_version: 1,
+            profile,
+        };
+        assert!(
+            identity
+                .encode_authn_id()
+                .expect("encode profile identity")
+                .ends_with(&format!(";p={canonical_name}"))
+        );
+    }
+}
+
+#[test]
+fn v1_profiles_and_prefixed_roles_fail_closed() {
+    let key = signing_key();
+    let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
+    let base = valid_oauth_claims();
+
+    for (profile, role) in [
+        ("business-admin", "gomtm_candidate_business_admin"),
+        ("database-developer", "gomtm_candidate_database_developer"),
+    ] {
+        let mut claims = serde_json::to_value(base.clone()).expect("claims JSON");
+        let object = claims.as_object_mut().expect("claims object");
+        object.insert("db_profile".into(), json!(profile));
+        object.insert("db_role".into(), json!(role));
+        let token = sign_payload(claims, KID, &key);
+        assert_eq!(
+            verifier.verify(&token, role, NOW),
+            Err(JwtValidationError::InvalidToken),
+            "v1 profile {profile} must not enter the v2 contract"
+        );
+    }
+
+    for role in ["gomtm_candidate_ordinary", "gomtm_ordinary"] {
+        let mut claims = base.clone();
+        claims.db_role = role.into();
+        let token = sign_payload(claims, KID, &key);
+        assert_eq!(
+            verifier.verify(&token, role, NOW),
+            Err(JwtValidationError::InvalidClaims),
+            "prefixed role {role} must not enter the v2 contract"
+        );
     }
 }
 

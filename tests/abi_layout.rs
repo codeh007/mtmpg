@@ -70,7 +70,7 @@ fn callback_table_initializes_and_fails_closed_before_jwt_gate() {
         private_data: ptr::null_mut(),
     };
     let token = CString::new("header.payload.signature").expect("token");
-    let role = CString::new("gomtm_candidate_ordinary").expect("role");
+    let role = CString::new("ordinary").expect("role");
     let mut result = ValidatorModuleResult {
         authorized: true,
         authn_id: ptr::dangling_mut(),
@@ -130,7 +130,7 @@ fn callback_null_inputs_fail_closed_without_leaking_result_state() {
         private_data: ptr::null_mut(),
     };
     let token = CString::new("header.payload.signature").expect("token");
-    let role = CString::new("gomtm_candidate_ordinary").expect("role");
+    let role = CString::new("ordinary").expect("role");
     unsafe { startup(&mut state) };
 
     for (state_ptr, token_ptr, role_ptr) in [
