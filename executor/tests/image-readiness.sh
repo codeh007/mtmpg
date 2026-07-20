@@ -120,7 +120,7 @@ curl_status=0
 for _ in $(seq 1 80); do
   if curl --fail --silent --show-error \
     --noproxy '*' \
-    --cacert "${RUNTIME_ROOT}/mount/ca.crt" \
+    --cacert "${ARTIFACT_ROOT}/runtime/ca.crt" \
     --resolve "executor:${host_port}:127.0.0.1" \
     "https://executor:${host_port}/ready" >/dev/null 2>&1; then
     ready=1
@@ -152,7 +152,7 @@ if test "${ready}" -ne 1; then
   fail "image HTTPS readiness failed with curl status ${curl_status}"
 fi
 
-hmac_secret="$(tr -d '\n' <"${RUNTIME_ROOT}/mount/hmac.secret")"
+hmac_secret="$(tr -d '\n' <"${ARTIFACT_ROOT}/runtime/hmac.secret")"
 if test -n "${hmac_secret}" && grep --fixed-strings --quiet "${hmac_secret}" "${RUNTIME_ROOT}/service.log"; then
   fail "service log disclosed the HMAC secret"
 fi
