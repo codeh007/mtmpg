@@ -116,6 +116,7 @@ SERVICE_CONTAINER="$(docker run --detach \
 host_port="$(docker inspect --format '{{(index (index .NetworkSettings.Ports "8443/tcp") 0).HostPort}}' "${SERVICE_CONTAINER}")"
 test -n "${host_port}" || fail "HTTPS port was not published"
 ready=0
+curl_status=0
 for _ in $(seq 1 80); do
   if curl --fail --silent --show-error \
     --noproxy '*' \
@@ -124,15 +125,33 @@ for _ in $(seq 1 80); do
     "https://executor:${host_port}/ready" >/dev/null 2>&1; then
     ready=1
     break
+  else
+    curl_status=$?
   fi
   if ! docker inspect --format '{{.State.Running}}' "${SERVICE_CONTAINER}" | grep --quiet '^true$'; then
     break
   fi
   sleep 0.25
 done
-test "${ready}" -eq 1 || fail "image did not become HTTPS ready"
-
 docker logs "${SERVICE_CONTAINER}" >"${RUNTIME_ROOT}/service.log" 2>&1
+if test "${ready}" -ne 1; then
+  for startup_stage in \
+    hmac \
+    signing_key \
+    issuer \
+    token_registry \
+    libpq \
+    database_tls \
+    listen \
+    https_tls \
+    https_server; do
+    if grep --quiet "^executor startup failed: ${startup_stage}$" "${RUNTIME_ROOT}/service.log"; then
+      fail "image exited during ${startup_stage} startup"
+    fi
+  done
+  fail "image HTTPS readiness failed with curl status ${curl_status}"
+fi
+
 hmac_secret="$(tr -d '\n' <"${RUNTIME_ROOT}/mount/hmac.secret")"
 if test -n "${hmac_secret}" && grep --fixed-strings --quiet "${hmac_secret}" "${RUNTIME_ROOT}/service.log"; then
   fail "service log disclosed the HMAC secret"
