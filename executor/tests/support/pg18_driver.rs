@@ -137,14 +137,24 @@ fn verify_hmac_boundary(harness: &Harness) -> Result<(), Box<dyn Error>> {
     let first = harness.execute_with_envelope(body.clone(), timestamp, nonce, Some(&signature))?;
     expect_success(&first, "valid HMAC request")?;
     let replay = harness.execute_with_envelope(body.clone(), timestamp, nonce, Some(&signature))?;
-    expect_error(&replay, StatusCode::UNAUTHORIZED, "unauthorized")?;
+    expect_error(
+        &replay,
+        StatusCode::UNAUTHORIZED,
+        "unauthorized",
+        "replayed HMAC request",
+    )?;
     let tampered = harness.execute_with_envelope(
         body,
         timestamp,
         "ffeeddccbbaa99887766554433221100",
         Some(&"00".repeat(32)),
     )?;
-    expect_error(&tampered, StatusCode::UNAUTHORIZED, "unauthorized")?;
+    expect_error(
+        &tampered,
+        StatusCode::UNAUTHORIZED,
+        "unauthorized",
+        "tampered HMAC request",
+    )?;
     Ok(())
 }
 
@@ -225,6 +235,7 @@ fn verify_extended_protocol_and_statement_boundary(
         &multiple,
         StatusCode::UNPROCESSABLE_ENTITY,
         "database_rejected",
+        "multiple statement request",
     )?;
 
     let cte = harness.execute(harness.request(
@@ -265,6 +276,7 @@ fn verify_transaction_and_budget_boundaries(harness: &Harness) -> Result<(), Box
         &read_write,
         StatusCode::UNPROCESSABLE_ENTITY,
         "database_rejected",
+        "read-only write request",
     )?;
 
     let mut confirmed = harness.request(
@@ -289,6 +301,7 @@ fn verify_transaction_and_budget_boundaries(harness: &Harness) -> Result<(), Box
         &harness.execute(failure)?,
         StatusCode::UNPROCESSABLE_ENTITY,
         "database_rejected",
+        "failed routine request",
     )?;
 
     let mut oversized_change = harness.request(
@@ -302,6 +315,7 @@ fn verify_transaction_and_budget_boundaries(harness: &Harness) -> Result<(), Box
         &harness.execute(oversized_change)?,
         StatusCode::PAYLOAD_TOO_LARGE,
         "budget_exceeded",
+        "change result budget",
     )?;
 
     for statement in [
@@ -313,6 +327,7 @@ fn verify_transaction_and_budget_boundaries(harness: &Harness) -> Result<(), Box
             &harness.execute(harness.request("ordinary", "oauth", statement))?,
             StatusCode::PAYLOAD_TOO_LARGE,
             "budget_exceeded",
+            "read result budget",
         )?;
     }
 
@@ -328,7 +343,12 @@ fn verify_transaction_and_budget_boundaries(harness: &Harness) -> Result<(), Box
 
 fn verify_deadline_and_cancellation(harness: &Harness) -> Result<(), Box<dyn Error>> {
     let deadline = harness.execute(harness.request("ordinary", "oauth", "SELECT pg_sleep(10)"))?;
-    expect_error(&deadline, StatusCode::GATEWAY_TIMEOUT, "deadline_exceeded")?;
+    expect_error(
+        &deadline,
+        StatusCode::GATEWAY_TIMEOUT,
+        "deadline_exceeded",
+        "statement deadline",
+    )?;
 
     let ca_path = required_environment("MTMPG_EXECUTOR_CA_PATH")?;
     let ca = Certificate::from_pem(&fs::read(ca_path)?)?;
@@ -427,9 +447,19 @@ fn expect_error(
     response: &(StatusCode, Value),
     status: StatusCode,
     category: &str,
+    context: &str,
 ) -> Result<(), IoError> {
     if response.0 != status || response.1["error"]["category"] != category {
-        return Err(invalid_data("executor error category did not match"));
+        let actual_category = response.1["error"]["category"]
+            .as_str()
+            .unwrap_or("missing");
+        return Err(IoError::new(
+            ErrorKind::InvalidData,
+            format!(
+                "{context} expected HTTP {status} category {category}, got HTTP {} category {actual_category}",
+                response.0
+            ),
+        ));
     }
     Ok(())
 }
