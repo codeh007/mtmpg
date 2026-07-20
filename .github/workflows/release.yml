@@ -483,14 +483,31 @@ jobs:
             --notes "$release_notes"
 
           draft_release="$RUNNER_TEMP/draft-release.json"
+          draft_releases="$RUNNER_TEMP/draft-releases.json"
           published_release="$RUNNER_TEMP/published-release.json"
-          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-            --paginate \
-            | jq --slurp --exit-status \
-                --arg tag "$TAG" \
-                '[.[][] | select(.tag_name == $tag and .draft == true)] |
-                 if length == 1 then .[0] else error("expected exactly one draft release") end' \
-                >"$draft_release"
+          for attempt in {1..12}; do
+            gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --paginate \
+              | jq --slurp --exit-status \
+                  --arg tag "$TAG" \
+                  '[.[][] | select(.tag_name == $tag and .draft == true)]' \
+                  >"$draft_releases"
+            draft_count="$(jq 'length' "$draft_releases")"
+            if test "$draft_count" -eq 1; then
+              jq '.[0]' "$draft_releases" >"$draft_release"
+              break
+            fi
+            if test "$draft_count" -gt 1; then
+              echo "found multiple draft releases for $TAG" >&2
+              exit 1
+            fi
+            if test "$attempt" -eq 12; then
+              echo "draft release for $TAG was not visible after 12 attempts" >&2
+              exit 1
+            fi
+            echo "draft release for $TAG is not visible yet (attempt $attempt/12)"
+            sleep 5
+          done
           jq --exit-status \
             --arg tag "$TAG" \
             '.tag_name == $tag and .draft == true and .immutable == false' \
