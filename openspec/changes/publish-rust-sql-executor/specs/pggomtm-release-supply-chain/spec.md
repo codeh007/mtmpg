@@ -23,13 +23,13 @@ PR、`main`与executor release SHALL复用仓库标准只读CI，一次解析Rus
 - **THEN** CI SHALL失败并阻止全部executor发布
 
 ### Requirement: Executor release必须使用独立不可变版本身份
-Executor SHALL使用自身Cargo package version、annotated `executor-v<semver>` tag、`ghcr.io/codeh007/mtmpg-executor:<semver>` image和独立GitHub Release。Tag version MUST与executor package精确一致，且 MUST NOT触发、移动、覆盖或更新validator的`v<semver>` tag、`ghcr.io/codeh007/mtmpg:<semver>`、Release或`latest`。初始`executor-v0.1.0`历史身份 SHALL保持不可变；若该发布因供应链材料不完整而不可消费，修复 SHALL递增patch并使用新的tag、image与Release，当前前向修复目标为`executor-v0.1.1`。
+Executor SHALL使用自身Cargo package version、annotated `executor-v<semver>` tag、`ghcr.io/codeh007/mtmpg-executor:<semver>` image和独立GitHub Release。Tag version MUST与executor package精确一致，且 MUST NOT触发、移动、覆盖或更新validator的`v<semver>` tag、`ghcr.io/codeh007/mtmpg:<semver>`、Release或`latest`。`executor-v0.1.0`与`executor-v0.1.1`历史身份 SHALL保持不变；若发布因供应链材料、draft发布或Release查询失败而不可消费，修复 SHALL递增patch并使用新的tag、image与Release，当前前向修复目标为`executor-v0.1.2`。
 
-只读CI SHALL从tag精确source物化一次已验证executor OCI archive；最小写权限publish job SHALL只推送该archive并生成manifest、checksums、Cargo.lock、resolved inputs、SPDX SBOM、provenance和GitHub attestation，不得重新resolve、Cargo build或Docker build。全部Release附件 MUST在draft状态上传并核验，随后同一Release才可发布并冻结；正式发布后 MUST NOT再上传或替换附件。Gomtmui SHALL只消费明确SemVer和匹配resolved digest，不使用executor `latest`或本地fallback。
+只读CI SHALL从tag精确source物化一次已验证executor OCI archive；最小写权限publish job SHALL只推送该archive并生成manifest、checksums、Cargo.lock、resolved inputs、SPDX SBOM、provenance和GitHub attestation，不得重新resolve、Cargo build或Docker build。全部Release附件 MUST在draft状态上传并核验，workflow MUST从Release列表唯一解析该draft的数值ID而不得通过published-only tag endpoint查询，随后同一Release才可发布并冻结；正式发布后 MUST NOT再上传或替换附件。Gomtmui SHALL只消费明确SemVer和匹配resolved digest，不使用executor `latest`或本地fallback。
 
 #### Scenario: 前向发布可消费的executor stable
-- **WHEN** `executor-v0.1.0`已是不可变但无附件的失败历史，且annotated `executor-v0.1.1`指向精确main GREEN ancestry、version匹配、目标身份不存在并且全部门禁通过
-- **THEN** workflow SHALL一次发布`mtmpg-executor:0.1.1`及具有完整附件的独立immutable Release，validator v0.2.0 tag、image、Release与latest身份保持不变
+- **WHEN** `executor-v0.1.0`与`executor-v0.1.1`已作为失败历史保留，且annotated `executor-v0.1.2`指向精确main GREEN ancestry、version匹配、目标身份不存在并且全部门禁通过
+- **THEN** workflow SHALL一次发布`mtmpg-executor:0.1.2`及具有完整附件的独立immutable Release，validator v0.2.0 tag、image、Release与latest身份保持不变
 
 #### Scenario: Draft附件上传失败
 - **WHEN** 任一manifest、checksums、Cargo.lock、resolved inputs、SBOM、provenance或attestation在draft阶段缺失或核验失败

@@ -26,15 +26,15 @@
 
 ### 1. 一个workspace包含两个独立产品package
 
-根Cargo package继续命名`pggomtm`并保持validator版本线；新增`executor/` package，历史初始版本为`0.1.0`，当前前向修复版本为`0.1.1`。Workspace只包含这两个产品package并共享一次解析的`Cargo.lock`。Validator中与pgrx无关的profile、role、claims schema和identity输入约束抽成纯Rust contract模块；executor以关闭validator默认feature的path dependency复用该模块，不能复制claim struct、profile闭集或role映射。
+根Cargo package继续命名`pggomtm`并保持validator版本线；新增`executor/` package，历史初始版本为`0.1.0`，当前前向修复版本为`0.1.2`。Workspace只包含这两个产品package并共享一次解析的`Cargo.lock`。Validator中与pgrx无关的profile、role、claims schema和identity输入约束抽成纯Rust contract模块；executor以关闭validator默认feature的path dependency复用该模块，不能复制claim struct、profile闭集或role映射。
 
 Validator的pgrx、server OAuth ABI与runtime config保持在根package并只由`pg18` feature构建。Executor的HTTP、TLS、HMAC、signer和libpq client依赖只存在于executor package，不能进入`pggomtm.so`。相比把binary塞进validator package，该布局允许独立版本和依赖；相比两个无workspace crate，它避免第二lockfile和第二contract实现。
 
 ### 2. Validator与executor使用独立不可变发布身份
 
-现有`v<semver>` tag、`ghcr.io/codeh007/mtmpg:<semver>`和`latest`只属于validator，`v0.2.0`不移动、不重建。Executor使用`executor-v<semver>` annotated tag、`ghcr.io/codeh007/mtmpg-executor:<semver>`和独立GitHub Release。`executor-v0.1.0`已经是不可变但无附件的失败历史；修复后的当前稳定消费身份是`executor-v0.1.1`/`0.1.1`。Executor stable MAY维护自己的`latest`，但gomtmui只消费明确SemVer。
+现有`v<semver>` tag、`ghcr.io/codeh007/mtmpg:<semver>`和`latest`只属于validator，`v0.2.0`不移动、不重建。Executor使用`executor-v<semver>` annotated tag、`ghcr.io/codeh007/mtmpg-executor:<semver>`和独立GitHub Release。`executor-v0.1.0`已经是不可变但无附件的失败历史；`executor-v0.1.1`已推送image与attestation并建立完整draft附件，但workflow错误地通过tag endpoint查询draft而失败。修复后的当前稳定消费目标是`executor-v0.1.2`/`0.1.2`。Executor stable MAY维护自己的`latest`，但gomtmui只消费明确SemVer。
 
-0.1.1发布必须使用精确的main GREEN SHA。只读CI先验证tag、package version、共享lockfile、PG18/libpq输入和final image，再在draft Release中上传manifest、checksums、lockfile、resolved inputs、SBOM、provenance与attestation；全部附件核验通过后才将同一个Release发布并冻结。已冻结的Release不再接受后续上传，因此先正式发布、后上传附件的顺序属于发布错误，必须通过递增patch前向修复。
+0.1.2发布必须使用精确的main GREEN SHA。只读CI先验证tag、package version、共享lockfile、PG18/libpq输入和final image，再在draft Release中上传manifest、checksums、lockfile、resolved inputs、SBOM、provenance与attestation；workflow必须从Release列表唯一解析draft数值ID，不能使用只返回published Release的tag endpoint。全部附件核验通过后才将同一个Release发布并冻结。已形成的tag、versioned image、attestation或Release历史不得覆盖，发布错误必须通过递增patch前向修复。
 
 PR/main运行同一只读CI并验证两个package。Release workflow向CI传入明确product，CI只物化该product已经验证的OCI archive；publish job不重新Cargo resolve、build或Docker build。每个product的manifest、SBOM、provenance和attestation包含source、共享lockfile、实际PG18/libpq、image digest和对应package version。
 
@@ -93,8 +93,8 @@ CI在构建前运行Rust领域、FFI layout、真实PG18、并发token、TLS/HMA
 2. 抽取pgrx无关的contract模块并保持validator完整GREEN，再实现HMAC/protocol/issuer与libpq FFI单元边界。
 3. 实现真实PG18并发OAuth、extended protocol、transaction、budget和cancel harness，取得精确main GREEN run。
 4. 增加executor image与统一CI/release product分派，验证validator image与既有v0.2.0未变化，并取得final-image GREEN。
-5. 保留`executor-v0.1.0`的不可变失败历史，修复workflow的draft发布顺序并将executor package递增到`0.1.1`。
-6. 在精确main GREEN SHA创建annotated `executor-v0.1.1` tag，由标准workflow一次发布`0.1.1` image、Release和供应链材料；匿名核对tag、source、digest、SBOM、provenance与attestation，并核对validator `v0.2.0`身份未变化。
+5. 保留`executor-v0.1.0`与`executor-v0.1.1`失败历史，修复workflow的draft发布顺序与draft ID解析并将executor package递增到`0.1.2`。
+6. 在精确main GREEN SHA创建annotated `executor-v0.1.2` tag，由标准workflow一次发布`0.1.2` image、Release和供应链材料；匿名核对tag、source、digest、SBOM、provenance与attestation，并核对validator `v0.2.0`身份未变化。
 7. Gomtmui只在resolved identity与全部platform gate通过后选择该executor image；失败时保持SQL tool未注册。
 
 Rollback不修改或删除已发布validator/executor身份。Candidate只需取消SQL tool注册并停止executor；若executor release不可消费，则修复源码并发布更高patch，不移动旧tag或回退到Go/Worker signer/SCRAM路径。

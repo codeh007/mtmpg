@@ -37,8 +37,8 @@
 - [x] 6.1 增加executor独立image定义，只包含release binary、匹配libpq runtime、CA与MIT license，以固定非root身份运行且不含toolchain/source/test/secret/PostgreSQL server
 - [x] 6.2 扩展标准CI product选择，构建一次executor OCI archive并验证非root HTTPS readiness、动态依赖、最小HMAC/OAuth allow-deny和image secret边界
 - [x] 6.3 增加`executor-v*`独立release workflow，校验annotated tag、executor Cargo version、精确SHA/main ancestry，并只推送同一CI已验证archive及manifest/checksums/SBOM/provenance/attestation
-- [ ] 6.4 保留immutable但无assets的`executor-v0.1.0`失败历史，修复draft发布顺序，并在精确main GREEN SHA创建annotated `executor-v0.1.1`，等待GitHub Actions成功发布完整image与独立Release
-- [ ] 6.5 匿名核对`0.1.1` image、source、Cargo.lock、resolved PG18/libpq、OCI digest、manifest、checksums、SBOM、provenance和attestation，并证明`mtmpg:v0.2.0` tag/image/Release未变化
+- [ ] 6.4 保留`executor-v0.1.0`与`executor-v0.1.1`失败历史，修复draft发布顺序与draft ID解析，并在精确main GREEN SHA创建annotated `executor-v0.1.2`，等待GitHub Actions成功发布完整image与独立Release
+- [ ] 6.5 匿名核对`0.1.2` image、source、Cargo.lock、resolved PG18/libpq、OCI digest、manifest、checksums、SBOM、provenance和attestation，并证明`mtmpg:v0.2.0` tag/image/Release未变化
 
 ## 7. 完成交付证据
 

@@ -484,7 +484,13 @@ jobs:
 
           draft_release="$RUNNER_TEMP/draft-release.json"
           published_release="$RUNNER_TEMP/published-release.json"
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" >"$draft_release"
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --paginate \
+            | jq --slurp --exit-status \
+                --arg tag "$TAG" \
+                '[.[][] | select(.tag_name == $tag and .draft == true)] |
+                 if length == 1 then .[0] else error("expected exactly one draft release") end' \
+                >"$draft_release"
           jq --exit-status \
             --arg tag "$TAG" \
             '.tag_name == $tag and .draft == true and .immutable == false' \
