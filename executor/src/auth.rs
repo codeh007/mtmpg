@@ -51,8 +51,8 @@ impl HmacAuthenticator {
             || request.path != EXECUTE_PATH
             || request.version != WIRE_VERSION
             || now.abs_diff(request.timestamp) > AUTH_WINDOW_SECONDS.unsigned_abs()
-            || !is_lower_hex(request.nonce, 32)
-            || !is_lower_hex(request.signature, 64)
+            || !is_lower_hex(request.nonce, 16)
+            || !is_lower_hex(request.signature, 32)
         {
             return Err(AuthenticationError::Unauthorized);
         }
