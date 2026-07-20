@@ -109,15 +109,7 @@ fn every_authenticated_component_is_covered_by_the_signature() {
             BODY,
             SIGNATURE,
         ),
-        request(
-            "POST",
-            EXECUTE_PATH,
-            "v2",
-            NOW,
-            NONCE,
-            BODY,
-            SIGNATURE,
-        ),
+        request("POST", EXECUTE_PATH, "v2", NOW, NONCE, BODY, SIGNATURE),
         request(
             "POST",
             EXECUTE_PATH,
@@ -181,8 +173,8 @@ fn malformed_nonce_and_signature_share_the_unauthorized_result() {
 
 #[test]
 fn a_full_replay_store_fails_closed_without_evicting_live_nonces() {
-    let authenticator = HmacAuthenticator::new(vec![0x0b; 32], 1)
-        .expect("valid bounded replay configuration");
+    let authenticator =
+        HmacAuthenticator::new(vec![0x0b; 32], 1).expect("valid bounded replay configuration");
     let first = request(
         "POST",
         EXECUTE_PATH,

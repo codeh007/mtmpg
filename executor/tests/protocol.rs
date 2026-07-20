@@ -177,22 +177,15 @@ fn statement_bind_and_body_limits_are_enforced_before_execution() {
     bind_count["statement"] = json!("SELECT 1");
     bind_count["binds"] = Value::Array(vec![json!({"type": "null"}); MAX_BIND_COUNT]);
     assert!(parse_value(&bind_count).is_ok());
-    bind_count["binds"] =
-        Value::Array(vec![json!({"type": "null"}); MAX_BIND_COUNT + 1]);
-    assert_eq!(
-        parse_value(&bind_count),
-        Err(ProtocolError::LimitExceeded)
-    );
+    bind_count["binds"] = Value::Array(vec![json!({"type": "null"}); MAX_BIND_COUNT + 1]);
+    assert_eq!(parse_value(&bind_count), Err(ProtocolError::LimitExceeded));
 
     let mut bind_value = request_value(principal("oauth", "ordinary"));
     bind_value["statement"] = json!("SELECT $1::text");
     bind_value["binds"] = json!([
         {"type": "text", "value": "x".repeat(MAX_BIND_VALUE_BYTES + 1)}
     ]);
-    assert_eq!(
-        parse_value(&bind_value),
-        Err(ProtocolError::LimitExceeded)
-    );
+    assert_eq!(parse_value(&bind_value), Err(ProtocolError::LimitExceeded));
 
     assert_eq!(
         parse_execute_request(&vec![b' '; MAX_REQUEST_BODY_BYTES + 1]),
@@ -233,9 +226,7 @@ fn malformed_bind_and_correlation_shapes_are_rejected() {
     }
 
     let mut duplicate_shape = request_value(principal("oauth", "ordinary"));
-    let object: &mut Map<String, Value> = duplicate_shape
-        .as_object_mut()
-        .expect("request object");
+    let object: &mut Map<String, Value> = duplicate_shape.as_object_mut().expect("request object");
     object.insert("statement".into(), Value::Array(vec![json!("SELECT 1")]));
     assert_eq!(
         parse_value(&duplicate_shape),

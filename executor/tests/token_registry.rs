@@ -1,9 +1,7 @@
 use std::sync::{Arc, Barrier};
 use std::thread;
 
-use mtmpg_executor::token_registry::{
-    ConnectionId, ConnectionTokenRegistry, TokenRegistryError,
-};
+use mtmpg_executor::token_registry::{ConnectionId, ConnectionTokenRegistry, TokenRegistryError};
 
 #[test]
 fn token_is_claimed_exactly_once_for_its_connection() {
@@ -78,9 +76,8 @@ fn bounded_registry_fails_closed_when_full() {
 #[test]
 fn concurrent_connections_never_observe_another_principals_token() {
     const CONNECTIONS: usize = 32;
-    let registry = Arc::new(
-        ConnectionTokenRegistry::with_capacity(CONNECTIONS).expect("bounded registry"),
-    );
+    let registry =
+        Arc::new(ConnectionTokenRegistry::with_capacity(CONNECTIONS).expect("bounded registry"));
     let barrier = Arc::new(Barrier::new(CONNECTIONS));
     let mut threads = Vec::new();
 

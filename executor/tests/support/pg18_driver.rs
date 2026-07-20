@@ -1,14 +1,14 @@
 use std::error::Error;
 use std::fs;
 use std::io::{Error as IoError, ErrorKind};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use hmac::{Hmac, Mac};
 use reqwest::blocking::{Client, Response};
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
+use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use reqwest::{Certificate, StatusCode};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -57,10 +57,7 @@ impl Harness {
 
     fn execute(&self, body: Value) -> Result<(StatusCode, Value), Box<dyn Error>> {
         let timestamp = unix_time()?;
-        let nonce = format!(
-            "{:032x}",
-            self.nonce.fetch_add(1, Ordering::Relaxed)
-        );
+        let nonce = format!("{:032x}", self.nonce.fetch_add(1, Ordering::Relaxed));
         self.execute_with_envelope(body, timestamp, &nonce, None)
     }
 
@@ -161,7 +158,9 @@ fn verify_concurrent_identity_isolation(harness: &Arc<Harness>) -> Result<(), Bo
         let harness = Arc::clone(harness);
         workers.push(thread::spawn(move || -> Result<(), String> {
             let request = harness.request(profile, method, "SELECT current_user, system_user");
-            let response = harness.execute(request).map_err(|error| error.to_string())?;
+            let response = harness
+                .execute(request)
+                .map_err(|error| error.to_string())?;
             let result = expect_success(&response, "concurrent identity request")
                 .map_err(|error| error.to_string())?;
             let row = result["rows"]
@@ -221,7 +220,11 @@ fn verify_extended_protocol_and_statement_boundary(
         "oauth",
         "SELECT 1; INSERT INTO app.executor_probe(value) VALUES ('forbidden')",
     ))?;
-    expect_error(&multiple, StatusCode::UNPROCESSABLE_ENTITY, "database_rejected")?;
+    expect_error(
+        &multiple,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "database_rejected",
+    )?;
 
     let cte = harness.execute(harness.request(
         "ordinary",
@@ -278,11 +281,7 @@ fn verify_transaction_and_budget_boundaries(harness: &Harness) -> Result<(), Box
         "affected row count",
     )?;
 
-    let mut failure = harness.request(
-        "business_admin",
-        "api_key",
-        "CALL app.fail_after_insert()",
-    );
+    let mut failure = harness.request("business_admin", "api_key", "CALL app.fail_after_insert()");
     failure["intent"] = json!("change");
     failure["change_confirmed"] = json!(true);
     expect_error(
@@ -327,11 +326,7 @@ fn verify_transaction_and_budget_boundaries(harness: &Harness) -> Result<(), Box
 
 fn verify_deadline_and_cancellation(harness: &Harness) -> Result<(), Box<dyn Error>> {
     let deadline = harness.execute(harness.request("ordinary", "oauth", "SELECT pg_sleep(10)"))?;
-    expect_error(
-        &deadline,
-        StatusCode::GATEWAY_TIMEOUT,
-        "deadline_exceeded",
-    )?;
+    expect_error(&deadline, StatusCode::GATEWAY_TIMEOUT, "deadline_exceeded")?;
 
     let ca_path = required_environment("MTMPG_EXECUTOR_CA_PATH")?;
     let ca = Certificate::from_pem(&fs::read(ca_path)?)?;
@@ -388,20 +383,16 @@ fn headers(timestamp: i64, nonce: &str, signature: &str) -> Result<HeaderMap, Bo
         HeaderValue::from_str(&timestamp.to_string())?,
     );
     headers.insert("x-executor-nonce", HeaderValue::from_str(nonce)?);
-    headers.insert(
-        "x-executor-signature",
-        HeaderValue::from_str(signature)?,
-    );
+    headers.insert("x-executor-signature", HeaderValue::from_str(signature)?);
     Ok(headers)
 }
 
 fn sign(secret: &[u8], timestamp: i64, nonce: &str, body: &[u8]) -> Result<String, IoError> {
     let digest = Sha256::digest(body);
-    let canonical = format!(
-        "{WIRE_VERSION}\nPOST\n{EXECUTE_PATH}\n{timestamp}\n{nonce}\n{digest:x}"
-    );
-    let mut mac = HmacSha256::new_from_slice(secret)
-        .map_err(|_| invalid_data("invalid HMAC test secret"))?;
+    let canonical =
+        format!("{WIRE_VERSION}\nPOST\n{EXECUTE_PATH}\n{timestamp}\n{nonce}\n{digest:x}");
+    let mut mac =
+        HmacSha256::new_from_slice(secret).map_err(|_| invalid_data("invalid HMAC test secret"))?;
     mac.update(canonical.as_bytes());
     Ok(format!("{:x}", mac.finalize().into_bytes()))
 }

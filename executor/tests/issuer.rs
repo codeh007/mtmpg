@@ -20,8 +20,8 @@ fn signing_key() -> SigningKey {
 }
 
 fn verifier(key: &SigningKey) -> DatabaseTokenVerifier {
-    let mut jwk = serde_json::to_value(JsonWebKey::build(key.verifying_key()))
-        .expect("serialize public JWK");
+    let mut jwk =
+        serde_json::to_value(JsonWebKey::build(key.verifying_key())).expect("serialize public JWK");
     let object = jwk.as_object_mut().expect("JWK object");
     object.insert("alg".into(), json!("ES256"));
     object.insert("key_ops".into(), json!(["verify"]));
@@ -80,10 +80,7 @@ fn issues_exact_thirty_second_tokens_for_every_actor_and_generic_profile() {
             assert_eq!(verified.claims.audience, AUDIENCE);
             assert_eq!(verified.claims.subject, principal.user_id);
             assert_eq!(verified.claims.issued_at, NOW);
-            assert_eq!(
-                verified.claims.expires_at,
-                NOW + DATABASE_TOKEN_TTL_SECONDS
-            );
+            assert_eq!(verified.claims.expires_at, NOW + DATABASE_TOKEN_TTL_SECONDS);
             assert_eq!(verified.claims.scope, "database");
             assert_eq!(verified.claims.delegation_id, principal.delegation_id);
             assert_eq!(verified.claims.auth_method, method);
@@ -134,10 +131,7 @@ fn invalid_actor_or_caller_claim_shape_never_reaches_signing() {
     let issuer = issuer();
     let mut both = principal(AuthMethod::OAuth, DatabaseProfile::Ordinary);
     both.credential_id = Some("crd_01".into());
-    assert_eq!(
-        issuer.issue(&both, NOW),
-        Err(IssuerError::InvalidPrincipal)
-    );
+    assert_eq!(issuer.issue(&both, NOW), Err(IssuerError::InvalidPrincipal));
 
     let mut wrong_scope = principal(AuthMethod::OAuth, DatabaseProfile::Ordinary);
     wrong_scope.database_scope = "administrator".into();

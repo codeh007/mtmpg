@@ -44,10 +44,7 @@ impl ConnectionTokenRegistry {
         todo!("per-connection token registration is implemented after RED verification")
     }
 
-    pub fn claim(
-        &self,
-        _connection: ConnectionId,
-    ) -> Result<ClaimedToken, TokenRegistryError> {
+    pub fn claim(&self, _connection: ConnectionId) -> Result<ClaimedToken, TokenRegistryError> {
         todo!("one-time token claiming is implemented after RED verification")
     }
 

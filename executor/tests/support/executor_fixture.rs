@@ -6,9 +6,9 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use jaws::key::JsonWebKey;
+use p256::SecretKey;
 use p256::ecdsa::SigningKey;
 use p256::elliptic_curve::pkcs8::EncodePrivateKey;
-use p256::SecretKey;
 use serde_json::json;
 
 const ISSUER: &str = "https://auth.example.test/database";
