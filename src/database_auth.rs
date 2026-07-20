@@ -24,7 +24,7 @@ const MAX_INTERNAL_ID_BYTES: usize = 64;
 const MAX_KEY_ID_BYTES: usize = 128;
 const DATABASE_SCOPE: &str = "database";
 const SYSTEM_USER_PREFIX: &str = "oauth:";
-const AUTHN_ID_PREFIX: &str = "pggomtm:v1";
+const AUTHN_ID_PREFIX: &str = "pggomtm:v2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JwtValidationError {
@@ -140,9 +140,9 @@ impl FromStr for AuthMethod {
 pub enum DatabaseProfile {
     #[serde(rename = "ordinary")]
     Ordinary,
-    #[serde(rename = "business-admin")]
+    #[serde(rename = "business_admin")]
     BusinessAdmin,
-    #[serde(rename = "database-developer")]
+    #[serde(rename = "database_developer")]
     DatabaseDeveloper,
 }
 
@@ -150,17 +150,17 @@ impl DatabaseProfile {
     #[must_use]
     pub const fn database_role(self) -> &'static str {
         match self {
-            Self::Ordinary => "gomtm_candidate_ordinary",
-            Self::BusinessAdmin => "gomtm_candidate_business_admin",
-            Self::DatabaseDeveloper => "gomtm_candidate_database_developer",
+            Self::Ordinary => "ordinary",
+            Self::BusinessAdmin => "business_admin",
+            Self::DatabaseDeveloper => "database_developer",
         }
     }
 
     const fn as_str(self) -> &'static str {
         match self {
             Self::Ordinary => "ordinary",
-            Self::BusinessAdmin => "business-admin",
-            Self::DatabaseDeveloper => "database-developer",
+            Self::BusinessAdmin => "business_admin",
+            Self::DatabaseDeveloper => "database_developer",
         }
     }
 }
@@ -171,8 +171,8 @@ impl FromStr for DatabaseProfile {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "ordinary" => Ok(Self::Ordinary),
-            "business-admin" => Ok(Self::BusinessAdmin),
-            "database-developer" => Ok(Self::DatabaseDeveloper),
+            "business_admin" => Ok(Self::BusinessAdmin),
+            "database_developer" => Ok(Self::DatabaseDeveloper),
             _ => Err(JwtValidationError::InvalidIdentity),
         }
     }
