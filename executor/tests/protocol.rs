@@ -87,6 +87,20 @@ fn oauth_and_api_key_principals_use_one_strict_request_shape() {
 }
 
 #[test]
+fn non_expiring_api_key_is_valid_but_oauth_requires_credential_expiry() {
+    let mut api_key = principal("api_key", "ordinary");
+    api_key["credential_expires_at"] = Value::Null;
+    assert!(parse_value(&request_value(api_key)).is_ok());
+
+    let mut oauth = principal("oauth", "ordinary");
+    oauth["credential_expires_at"] = Value::Null;
+    assert_eq!(
+        parse_value(&request_value(oauth)),
+        Err(ProtocolError::InvalidRequest)
+    );
+}
+
+#[test]
 fn unknown_fields_and_all_caller_supplied_credentials_or_claims_are_rejected() {
     let base = request_value(principal("oauth", "ordinary"));
     let forbidden_top_level = ["statements", "database_jwt", "connection_string"];
