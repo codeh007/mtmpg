@@ -144,7 +144,8 @@ fn verify_hmac_boundary(harness: &Harness) -> Result<(), Box<dyn Error>> {
         "ffeeddccbbaa99887766554433221100",
         Some(&"00".repeat(32)),
     )?;
-    expect_error(&tampered, StatusCode::UNAUTHORIZED, "unauthorized")
+    expect_error(&tampered, StatusCode::UNAUTHORIZED, "unauthorized")?;
+    Ok(())
 }
 
 fn verify_concurrent_identity_isolation(harness: &Arc<Harness>) -> Result<(), Box<dyn Error>> {
@@ -321,7 +322,8 @@ fn verify_transaction_and_budget_boundaries(harness: &Harness) -> Result<(), Box
         "SELECT count(*) FROM app.executor_probe WHERE value IN ('read-write', 'failed', 'budget')",
     ))?;
     let result = expect_success(&count, "rollback count")?;
-    assert_json(&result["rows"][0][0], &json!("0"), "rollback count")
+    assert_json(&result["rows"][0][0], &json!("0"), "rollback count")?;
+    Ok(())
 }
 
 fn verify_deadline_and_cancellation(harness: &Harness) -> Result<(), Box<dyn Error>> {

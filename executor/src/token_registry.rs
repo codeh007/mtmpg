@@ -56,6 +56,11 @@ impl ConnectionTokenRegistry {
     pub fn len(&self) -> usize {
         todo!("registry accounting is implemented after RED verification")
     }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl fmt::Debug for ConnectionTokenRegistry {
