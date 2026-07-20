@@ -9,3 +9,7 @@
 !LICENSE
 !src/
 !src/**
+!executor/
+!executor/Cargo.toml
+!executor/src/
+!executor/src/**

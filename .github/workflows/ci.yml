@@ -129,7 +129,11 @@ jobs:
           test -n "$host_minor"
           test "$host_minor" = "$image_minor"
 
-          package_version="$(cargo metadata --locked --no-deps --format-version 1 | jq --raw-output '.packages[0].version')"
+          package_version="$(
+            cargo metadata --locked --no-deps --format-version 1 \
+              | jq --exit-status --raw-output \
+                  '[.packages[] | select(.name == "pggomtm") | .version] | if length == 1 then .[0] else error("expected exactly one pggomtm package") end'
+          )"
           if test "$UPLOAD_RELEASE_ARTIFACTS" = true; then
             test -n "$REQUESTED_RELEASE_VERSION"
             test "$REQUESTED_RELEASE_VERSION" = "$package_version"
