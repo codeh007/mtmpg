@@ -44,4 +44,4 @@
 
 - [x] 7.1 更新README与executor运行/失败/兼容文档，记录固定wire、mount、TLS、单实例nonce与无fallback边界，不包含真实credential或连接串
 - [x] 7.2 运行`openspec validate publish-rust-sql-executor --strict`、secret扫描和Git diff检查，回填精确RED/GREEN/release run、source、image digest与脱敏真实PG18证据
-- [ ] 7.3 将已发布executor identity交给gomtmui consumer change；只有gomtmui完整activation与OAuth/API-key E2E完成后，才在Issue #126宣告原始任务完成
+- [x] 7.3 将已发布executor identity交给gomtmui consumer change；只有gomtmui完整activation与OAuth/API-key E2E完成后，才在Issue #126宣告原始任务完成
