@@ -91,6 +91,7 @@ jobs:
       ARCHIVE_NAME: ${{ needs.metadata.outputs.product == 'executor' && 'mtmpg-executor.oci.tar' || 'mtmpg.oci.tar' }}
       ARTIFACT_HASH_FIELD: ${{ needs.metadata.outputs.product == 'executor' && 'binary_sha256' || 'module_sha256' }}
       ARTIFACT_PATH: ${{ needs.metadata.outputs.product == 'executor' && '/usr/local/bin/mtmpg-executor' || '/usr/lib/postgresql/18/lib/pggomtm.so' }}
+      ARTIFACT_NAME: ${{ needs.metadata.outputs.product == 'executor' && 'mtmpg-executor' || 'pggomtm.so' }}
       EXPECTED_VERIFIED_SCHEMA: ${{ needs.metadata.outputs.product == 'executor' && 'mtmpg-executor-verified-image/v1' || 'mtmpg-verified-image/v2' }}
       IMAGE_REPOSITORY: ${{ needs.metadata.outputs.product == 'executor' && 'ghcr.io/codeh007/mtmpg-executor' || 'ghcr.io/codeh007/mtmpg' }}
       PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
@@ -445,6 +446,11 @@ jobs:
             "$RUNNER_TEMP/anonymous-artifact"
           docker rm "$container_id" >/dev/null
           test "$(sha256sum "$RUNNER_TEMP/anonymous-artifact" | cut -d' ' -f1)" = "$ARTIFACT_SHA256"
+          install -m 0644 "$RUNNER_TEMP/anonymous-artifact" "$ASSET_ROOT/$ARTIFACT_NAME"
+          (
+            cd "$ASSET_ROOT"
+            sha256sum "$ARTIFACT_NAME" >> checksums.txt
+          )
 
           attestation_count="$(gh api "repos/$GITHUB_REPOSITORY/attestations/$REGISTRY_DIGEST?per_page=10" --jq '.attestations | length')"
           test "$attestation_count" -ge 2
@@ -465,6 +471,7 @@ jobs:
           Source: $GITHUB_SHA
           OCI digest: $REGISTRY_DIGEST"
           files=(
+            "$ASSET_ROOT/$ARTIFACT_NAME"
             "$ASSET_ROOT/Cargo.lock"
             "$ASSET_ROOT/resolved-inputs.json"
             "$ASSET_ROOT/verified-image.json"
@@ -549,6 +556,7 @@ jobs:
           verify_root="$RUNNER_TEMP/public-release-assets"
           install -d -m 0755 "$verify_root"
           for name in \
+            "$ARTIFACT_NAME" \
             Cargo.lock \
             resolved-inputs.json \
             verified-image.json \
