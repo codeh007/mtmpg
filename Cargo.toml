@@ -35,7 +35,7 @@ url = "2"
 
 [dev-dependencies]
 base64ct = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 
 [build-dependencies]
 bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
