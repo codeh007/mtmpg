@@ -8,7 +8,7 @@ publish = false
 [dependencies]
 axum = "0.8"
 axum-server = { version = "0.8", features = ["tls-rustls"] }
-hmac = "0.12"
+hmac = "0.13"
 jaws = { version = "1", default-features = false, features = ["p256"] }
 p256 = { version = "0.13", features = ["ecdsa"] }
 pggomtm = { path = "..", default-features = false, features = ["database-token-contract"] }
