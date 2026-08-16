@@ -50,7 +50,7 @@ mtmpg 使用 SemVer 作为用户可见身份：
 
 `.github/workflows/release.yml`严格分派validator `v<semver>`与executor `executor-v<semver>` annotated tag。它调用同一 `ci.yml`，下载该run已验证的目标OCI archive后推送一次，不在publish job中运行Cargo或Docker build。Prerelease与stable分别从自己的不可变tag完整解析、测试、构建和发布；executor release不修改validator tag、image、Release或`latest`。
 
-每个release的长期权威是版本化公开GHCR image、GitHub Release、Cargo.lock、`resolved-inputs.json`、release manifest、checksums、SPDX SBOM、provenance与GitHub attestation。Actions artifact只用于同一次run内传递。当前stable见 [v0.2.0](https://github.com/codeh007/mtmpg/releases/tag/v0.2.0)；[v0.1.0](https://github.com/codeh007/mtmpg/releases/tag/v0.1.0)与首个prerelease [v0.1.0-rc.1](https://github.com/codeh007/mtmpg/releases/tag/v0.1.0-rc.1)作为不可变历史保留。发布进度由 [mtmpg #1](https://github.com/codeh007/mtmpg/issues/1) 和 active OpenSpec change 跟踪。
+每个release的长期权威是版本化公开GHCR image、GitHub Release、Cargo.lock、`resolved-inputs.json`、release manifest、checksums、SPDX SBOM、provenance与GitHub attestation。Actions artifact只用于同一次run内传递。当前stable见 [v0.2.1](https://github.com/codeh007/mtmpg/releases/tag/v0.2.1)；[v0.1.0](https://github.com/codeh007/mtmpg/releases/tag/v0.1.0)与首个prerelease [v0.1.0-rc.1](https://github.com/codeh007/mtmpg/releases/tag/v0.1.0-rc.1)作为不可变历史保留。发布进度由 [mtmpg #1](https://github.com/codeh007/mtmpg/issues/1) 和 active OpenSpec change 跟踪。
 
 ## 维护入口
 
