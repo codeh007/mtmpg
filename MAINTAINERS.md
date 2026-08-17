@@ -4,7 +4,7 @@
 
 ## 源码与构建权威
 
-- 本仓库维护根validator与唯一`executor/`两个产品package、各自测试/image及共享CI；不得增加第三crate或第二实现。
+- 本仓库维护唯一根validator package、测试/image及共享CI；不得增加第二crate或第二实现。
 - 消费者只使用mtmpg发布的版本化image，不复制源码或现场编译。
 - 所有Cargo、PostgreSQL和Docker重计算只在GitHub Actions执行。
 - 维护者和Agent可以直接非force推进`main`；失败commit保留并由后续commit修复。
@@ -19,14 +19,14 @@ Rust stable、PG18 minor、兼容Cargo依赖、Actions major内版本和标准�
 
 - PostgreSQL major、pgrx不兼容major或OAuth ABI变化
 - Database token、profile-role、identity或reason-code contract变化
-- validator/executor SemVer、release manifest schema和release权限变化
+- validator SemVer、release manifest schema和release权限变化
 - 新平台、架构、libc或runtime发行版
 
 ## SemVer release
 
-只有合法validator `v<semver>`或executor `executor-v<semver>` annotated tag可以进入对应release workflow。Tag version必须与目标Cargo package version一致并指向`main` ancestry；publish job只能checkout tag作identity验证并推送同一run只读CI已验证的OCI archive，不得运行Cargo、重新解析依赖或执行Docker build。
+只有合法validator `v<semver>` annotated tag可以进入release workflow。Tag version必须与目标Cargo package version一致并指向`main` ancestry；publish job只能checkout tag作identity验证并推送同一run只读CI已验证的OCI archive，不得运行Cargo、重新解析依赖或执行Docker build。
 
-Prerelease与stable分别执行完整门禁并保存自己的Cargo.lock、resolved inputs、目标artifact、OCI digest、SBOM、provenance和attestation。Prerelease不得更新`latest`；validator stable成功后更新validator `latest`，executor始终只发布明确SemVer。任何既有version、tag、asset或Release都不得覆盖。
+Prerelease与stable分别执行完整门禁并保存自己的Cargo.lock、resolved inputs、目标artifact、OCI digest、SBOM、provenance和attestation。Prerelease不得更新`latest`；validator stable成功后更新validator `latest`。任何既有version、tag、asset或Release都不得覆盖。
 
 ## 禁止操作
 

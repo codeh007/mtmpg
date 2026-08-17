@@ -1,3 +1,5 @@
+> ⚠️ 本 change 的 profile-role/identity 契约方向已被 gomtm issue #310 硬切取代：database-token 最小化 v1 + `oauth:<issuer-host>:v1`（见 change `slim-validator-only-database-token-v1`）。保留本文件作为不可变历史。
+
 ## 1. 规划与基线
 
 - [x] 1.1 严格校验本change的proposal、design、增量spec和tasks，并确认工作区只包含本change的规划改动

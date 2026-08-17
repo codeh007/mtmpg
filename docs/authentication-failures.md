@@ -27,8 +27,8 @@
 | `token-header-invalid` | JOSE header无效 |
 | `token-kid-unknown` | `kid`不在当前snapshot |
 | `token-signature-invalid` | ES256签名无效 |
-| `token-claims-invalid` | Claims、资源、时间或actor组合无效 |
-| `token-role-mismatch` | Requested role与signed role不一致 |
+| `token-claims-invalid` | Claims、资源、时间或profile组合无效 |
+| `token-role-mismatch` | Requested role与token profile不一致 |
 | `identity-invalid` | Identity字段或规范编码无效 |
 | `callback-input-invalid` | Callback收到无效指针或文本输入 |
 | `callback-state-invalid` | Callback state未初始化或不一致 |

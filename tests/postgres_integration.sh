@@ -51,30 +51,6 @@ validate_artifacts() {
   done
 }
 
-validate_executor_artifacts() {
-  local artifact_root="$1"
-  local artifact
-  for artifact in \
-    mtmpg-executor \
-    mtmpg_executor_fixture \
-    mtmpg_executor_pg18_driver \
-    pggomtm.so \
-    executor_postgres_setup.sql \
-    runtime/ca.crt \
-    runtime/executor.crt \
-    runtime/executor.key \
-    runtime/hmac.secret \
-    runtime/jwks.json \
-    runtime/postgres.crt \
-    runtime/postgres.key \
-    runtime/signing-key.pem \
-    runtime/validator.json; do
-    if test ! -f "${artifact_root}/${artifact}" || test -L "${artifact_root}/${artifact}"; then
-      fail "required executor integration artifact is unavailable: ${artifact}"
-    fi
-  done
-}
-
 run_integration() {
   test "$#" -eq 2 || fail "run requires a mode and one artifact directory"
   local mode="$1"
@@ -87,7 +63,6 @@ run_integration() {
   test -d "${artifact_root}" || fail "artifact directory is unavailable"
   case "${mode}" in
     run) validate_artifacts "${artifact_root}" ;;
-    run-executor) validate_executor_artifacts "${artifact_root}" ;;
     *) fail "unknown integration mode" ;;
   esac
 
@@ -120,7 +95,6 @@ run_integration() {
 usage() {
   printf '%s\n' \
     'usage: tests/postgres_integration.sh run ARTIFACT_DIRECTORY' \
-    '       tests/postgres_integration.sh run-executor ARTIFACT_DIRECTORY' \
     '' \
     "runtime: ${POSTGRES_IMAGE}"
 }
@@ -133,11 +107,6 @@ case "${1:-}" in
     require_github_actions
     shift
     run_integration run "$@"
-    ;;
-  run-executor)
-    require_github_actions
-    shift
-    run_integration run-executor "$@"
     ;;
   *)
     usage >&2

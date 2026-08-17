@@ -4,7 +4,6 @@ on:
   push:
     tags:
       - "v[0-9]*.[0-9]*.[0-9]*"
-      - "executor-v[0-9]*.[0-9]*.[0-9]*"
 
 permissions:
   contents: read
@@ -33,11 +32,6 @@ jobs:
           test "$GITHUB_REF_TYPE" = "tag"
           tag="$GITHUB_REF_NAME"
           case "$tag" in
-            executor-v*)
-              product=executor
-              version="${tag#executor-v}"
-              expected_tag="executor-v$version"
-              ;;
             v*)
               product=validator
               version="${tag#v}"
@@ -88,12 +82,12 @@ jobs:
       artifact-metadata: write
     env:
       GH_TOKEN: ${{ github.token }}
-      ARCHIVE_NAME: ${{ needs.metadata.outputs.product == 'executor' && 'mtmpg-executor.oci.tar' || 'mtmpg.oci.tar' }}
-      ARTIFACT_HASH_FIELD: ${{ needs.metadata.outputs.product == 'executor' && 'binary_sha256' || 'module_sha256' }}
-      ARTIFACT_PATH: ${{ needs.metadata.outputs.product == 'executor' && '/usr/local/bin/mtmpg-executor' || '/usr/lib/postgresql/18/lib/pggomtm.so' }}
-      ARTIFACT_NAME: ${{ needs.metadata.outputs.product == 'executor' && 'mtmpg-executor' || 'pggomtm.so' }}
-      EXPECTED_VERIFIED_SCHEMA: ${{ needs.metadata.outputs.product == 'executor' && 'mtmpg-executor-verified-image/v1' || 'mtmpg-verified-image/v2' }}
-      IMAGE_REPOSITORY: ${{ needs.metadata.outputs.product == 'executor' && 'ghcr.io/codeh007/mtmpg-executor' || 'ghcr.io/codeh007/mtmpg' }}
+      ARCHIVE_NAME: mtmpg.oci.tar
+      ARTIFACT_HASH_FIELD: module_sha256
+      ARTIFACT_PATH: /usr/lib/postgresql/18/lib/pggomtm.so
+      ARTIFACT_NAME: pggomtm.so
+      EXPECTED_VERIFIED_SCHEMA: mtmpg-verified-image/v2
+      IMAGE_REPOSITORY: ghcr.io/codeh007/mtmpg
       PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
       PRODUCT: ${{ needs.metadata.outputs.product }}
       TAG: ${{ github.ref_name }}
@@ -194,22 +188,6 @@ jobs:
           fi
           latest_release_before="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
 
-          validator_release_before=""
-          validator_source_before=""
-          validator_version_digest_before=""
-          validator_latest_digest_before=""
-          if test "$PRODUCT" = executor; then
-            validator_source_before="$(gh api "repos/$GITHUB_REPOSITORY/commits/v0.2.0" --jq .sha)"
-            validator_release_before="$(
-              gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.2.0" \
-                --jq '{id, tag_name, target_commitish, published_at, updated_at, assets: [.assets[] | {id, name, size, digest}]}' \
-                | sha256sum \
-                | cut -d' ' -f1
-            )"
-            validator_version_digest_before="$(skopeo inspect --authfile "$auth_file" --format '{{.Digest}}' "docker://ghcr.io/codeh007/mtmpg:0.2.0")"
-            validator_latest_digest_before="$(skopeo inspect --authfile "$auth_file" --format '{{.Digest}}' "docker://ghcr.io/codeh007/mtmpg:latest")"
-          fi
-
           install -d -m 0755 "$asset_root"
           {
             echo "ARCHIVE=$archive"
@@ -219,10 +197,6 @@ jobs:
             echo "LATEST_RELEASE_BEFORE=$latest_release_before"
             echo "MATERIAL_ROOT=$material_root"
             echo "TARGET_REFERENCE=$target_reference"
-            echo "VALIDATOR_LATEST_DIGEST_BEFORE=$validator_latest_digest_before"
-            echo "VALIDATOR_RELEASE_BEFORE=$validator_release_before"
-            echo "VALIDATOR_SOURCE_BEFORE=$validator_source_before"
-            echo "VALIDATOR_VERSION_DIGEST_BEFORE=$validator_version_digest_before"
           } >>"$GITHUB_ENV"
 
       - name: Push the verified OCI archive once
@@ -459,13 +433,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if test "$PRODUCT" = executor; then
-            release_title="mtmpg executor $VERSION"
-            release_description="PostgreSQL 18 OAuth SQL executor image"
-          else
-            release_title="mtmpg $VERSION"
-            release_description="PostgreSQL 18 OAuth validator image"
-          fi
+          release_title="mtmpg $VERSION"
+          release_description="PostgreSQL 18 OAuth validator image"
           release_notes="$release_description: $IMAGE_REPOSITORY:$VERSION
 
           Source: $GITHUB_SHA
@@ -523,7 +492,7 @@ jobs:
           [[ "$release_id" =~ ^[0-9]+$ ]]
 
           make_latest=false
-          if test "$PRODUCT" = validator && test "$PRERELEASE" = false; then
+          if test "$PRERELEASE" = false; then
             make_latest=true
           fi
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
@@ -591,7 +560,7 @@ jobs:
             "$verify_root/release-manifest.json" >/dev/null
 
           auth_file="$HOME/.docker/config.json"
-          if test "$PRERELEASE" = true || test "$PRODUCT" = executor; then
+          if test "$PRERELEASE" = true; then
             if test "$LATEST_BEFORE" = absent; then
               ! skopeo inspect --authfile "$auth_file" "docker://$IMAGE_REPOSITORY:latest" >/dev/null 2>&1
             else
@@ -607,21 +576,9 @@ jobs:
           fi
 
           latest_release_after="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
-          if test "$PRODUCT" = validator && test "$PRERELEASE" = false; then
+          if test "$PRERELEASE" = false; then
             test "$latest_release_after" = "$TAG"
           else
             test "$latest_release_after" = "$LATEST_RELEASE_BEFORE"
           fi
 
-          if test "$PRODUCT" = executor; then
-            test "$(gh api "repos/$GITHUB_REPOSITORY/commits/v0.2.0" --jq .sha)" = "$VALIDATOR_SOURCE_BEFORE"
-            validator_release_after="$(
-              gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.2.0" \
-                --jq '{id, tag_name, target_commitish, published_at, updated_at, assets: [.assets[] | {id, name, size, digest}]}' \
-                | sha256sum \
-                | cut -d' ' -f1
-            )"
-            test "$validator_release_after" = "$VALIDATOR_RELEASE_BEFORE"
-            test "$(skopeo inspect --authfile "$auth_file" --format '{{.Digest}}' "docker://ghcr.io/codeh007/mtmpg:0.2.0")" = "$VALIDATOR_VERSION_DIGEST_BEFORE"
-            test "$(skopeo inspect --authfile "$auth_file" --format '{{.Digest}}' "docker://ghcr.io/codeh007/mtmpg:latest")" = "$VALIDATOR_LATEST_DIGEST_BEFORE"
-          fi

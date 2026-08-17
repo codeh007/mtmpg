@@ -5,15 +5,16 @@ use jaws::Token;
 use jaws::key::JsonWebKey;
 use p256::ecdsa::{Signature, SigningKey};
 use pggomtm::database_auth::{
-    AuthMethod, AuthenticatedActor, AuthenticatedIdentity, DatabaseProfile, DatabaseTokenClaims,
-    DatabaseTokenPolicy, DatabaseTokenVerifier, JwtValidationError, MAX_AUTHN_ID_BYTES,
-    MAX_TOKEN_TTL_SECONDS, MIN_TOKEN_TTL_SECONDS, decode_authn_id, decode_system_user,
+    AuthenticatedIdentity, DatabaseProfile, DatabaseTokenClaims, DatabaseTokenPolicy,
+    DatabaseTokenVerifier, JwtValidationError, MAX_AUTHN_ID_BYTES, MAX_TOKEN_TTL_SECONDS,
+    MIN_TOKEN_TTL_SECONDS, decode_authn_id, decode_system_user,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
 
 const ISSUER: &str = "https://candidate.example.test/oauth/database";
 const AUDIENCE: &str = "https://candidate.example.test/resources/database/gomtm-test";
+const ISSUER_HOST: &str = "candidate.example.test";
 const NOW: i64 = 1_800_000_000;
 const KID: &str = "candidate-es256-2026-07";
 
@@ -57,7 +58,7 @@ fn policy_requires_distinct_absolute_https_resources() {
     );
 }
 
-fn valid_oauth_claims() -> DatabaseTokenClaims {
+fn valid_claims() -> DatabaseTokenClaims {
     DatabaseTokenClaims {
         issuer: ISSUER.into(),
         audience: AUDIENCE.into(),
@@ -66,22 +67,16 @@ fn valid_oauth_claims() -> DatabaseTokenClaims {
         expires_at: NOW + 120,
         token_id: "jti_01J00000000000000000000000".into(),
         scope: "database".into(),
-        delegation_id: "dlg_01J00000000000000000000000".into(),
-        auth_method: AuthMethod::OAuth,
-        authority_version: 7,
-        db_profile: DatabaseProfile::Ordinary,
-        db_role: DatabaseProfile::Ordinary.database_role().into(),
-        client_id: Some("cli_01J00000000000000000000000".into()),
-        credential_id: None,
+        profile: DatabaseProfile::Ordinary,
     }
 }
 
-fn valid_api_key_claims() -> DatabaseTokenClaims {
-    let mut claims = valid_oauth_claims();
-    claims.auth_method = AuthMethod::ApiKey;
-    claims.client_id = None;
-    claims.credential_id = Some("crd_01J00000000000000000000000".into());
-    claims
+fn ordinary_identity() -> AuthenticatedIdentity {
+    AuthenticatedIdentity {
+        user_id: "usr_01J00000000000000000000000".into(),
+        profile: DatabaseProfile::Ordinary,
+        issuer_host: ISSUER_HOST.into(),
+    }
 }
 
 fn sign_payload(payload: impl Serialize, kid: &str, key: &SigningKey) -> String {
@@ -107,20 +102,21 @@ fn mutate_header(token: &str, mutate: impl FnOnce(&mut serde_json::Map<String, V
 }
 
 #[test]
-fn valid_es256_oauth_token_round_trips_versioned_identity() {
+fn valid_es256_token_round_trips_versioned_identity() {
     let key = signing_key();
     let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
-    let claims = valid_oauth_claims();
+    let claims = valid_claims();
     let token = sign_payload(claims.clone(), KID, &key);
 
     let verified = verifier
-        .verify(&token, claims.db_profile.database_role(), NOW + 1)
+        .verify(&token, claims.profile.database_role(), NOW + 1)
         .expect("valid database token");
 
     assert_eq!(verified.claims, claims);
+    assert_eq!(verified.identity, ordinary_identity());
     assert_eq!(
-        verified.identity.actor,
-        AuthenticatedActor::OAuthClient("cli_01J00000000000000000000000".into())
+        verified.authn_id,
+        "candidate.example.test:v1;u=usr_01J00000000000000000000000;p=ordinary"
     );
     assert_eq!(
         decode_authn_id(&verified.authn_id),
@@ -130,38 +126,11 @@ fn valid_es256_oauth_token_round_trips_versioned_identity() {
         decode_system_user(&format!("oauth:{}", verified.authn_id)),
         Ok(verified.identity)
     );
-    assert!(verified.authn_id.starts_with("pggomtm:v2;"));
     assert!(verified.authn_id.len() <= MAX_AUTHN_ID_BYTES);
 }
 
 #[test]
-fn valid_api_key_token_preserves_credential_attribution() {
-    let key = signing_key();
-    let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
-    let claims = valid_api_key_claims();
-    let token = sign_payload(claims.clone(), KID, &key);
-
-    let verified = verifier
-        .verify(&token, claims.db_profile.database_role(), NOW + 1)
-        .expect("valid API-key-derived database token");
-
-    assert_eq!(
-        verified.identity.actor,
-        AuthenticatedActor::ApiKeyCredential("crd_01J00000000000000000000000".into())
-    );
-    assert_eq!(verified.identity.auth_method, AuthMethod::ApiKey);
-    assert_eq!(
-        decode_authn_id(&verified.authn_id),
-        Ok(verified.identity.clone())
-    );
-    assert_eq!(
-        decode_system_user(&format!("oauth:{}", verified.authn_id)),
-        Ok(verified.identity)
-    );
-}
-
-#[test]
-fn every_actor_profile_and_ttl_boundary_combination_is_valid() {
+fn every_profile_and_ttl_boundary_is_valid() {
     let key = signing_key();
     let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
 
@@ -173,97 +142,47 @@ fn every_actor_profile_and_ttl_boundary_combination_is_valid() {
     .into_iter()
     .enumerate()
     {
-        for (method_index, method) in [AuthMethod::OAuth, AuthMethod::ApiKey]
-            .into_iter()
-            .enumerate()
-        {
-            let mut claims = match method {
-                AuthMethod::OAuth => valid_oauth_claims(),
-                AuthMethod::ApiKey => valid_api_key_claims(),
+        let mut claims = valid_claims();
+        claims.profile = profile;
+        claims.expires_at = NOW
+            + if profile_index % 2 == 0 {
+                MIN_TOKEN_TTL_SECONDS
+            } else {
+                MAX_TOKEN_TTL_SECONDS
             };
-            claims.db_profile = profile;
-            claims.db_role = profile.database_role().into();
-            claims.authority_version = u64::try_from(profile_index * 2 + method_index + 1)
-                .expect("small authority version");
-            claims.issued_at = NOW;
-            claims.expires_at = NOW
-                + if method_index == 0 {
-                    MIN_TOKEN_TTL_SECONDS
-                } else {
-                    MAX_TOKEN_TTL_SECONDS
-                };
-            let token = sign_payload(claims.clone(), KID, &key);
+        let token = sign_payload(claims.clone(), KID, &key);
 
-            let verified = verifier
-                .verify(&token, profile.database_role(), NOW)
-                .expect("closed actor/profile combination must verify");
-            assert_eq!(verified.claims, claims);
-            assert_eq!(verified.identity.profile, profile);
-            assert_eq!(
-                verified.identity.authority_version,
-                claims.authority_version
-            );
-            assert!(matches!(
-                (method, &verified.identity.actor),
-                (AuthMethod::OAuth, AuthenticatedActor::OAuthClient(_))
-                    | (AuthMethod::ApiKey, AuthenticatedActor::ApiKeyCredential(_))
-            ));
-            assert_eq!(
-                decode_authn_id(&verified.authn_id),
-                Ok(verified.identity.clone())
-            );
-            assert_eq!(
-                decode_system_user(&format!("oauth:{}", verified.authn_id)),
-                Ok(verified.identity)
-            );
-        }
+        let verified = verifier
+            .verify(&token, profile.database_role(), NOW)
+            .expect("closed profile must verify");
+        assert_eq!(verified.claims, claims);
+        assert_eq!(verified.identity.profile, profile);
+        assert_eq!(
+            decode_authn_id(&verified.authn_id),
+            Ok(verified.identity.clone())
+        );
+        assert_eq!(
+            decode_system_user(&format!("oauth:{}", verified.authn_id)),
+            Ok(verified.identity)
+        );
     }
 }
 
 #[test]
-fn actor_authority_profile_role_and_id_matrix_fails_closed() {
+fn removed_legacy_claims_and_unknown_profile_fail_closed() {
     let key = signing_key();
     let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
-    let base = valid_oauth_claims();
-    let expected_role = base.db_profile.database_role();
-
-    let mut no_actor = base.clone();
-    no_actor.client_id = None;
-
-    let mut both_actors = base.clone();
-    both_actors.credential_id = Some("crd_01J00000000000000000000000".into());
-
-    let mut oauth_with_credential = base.clone();
-    oauth_with_credential.client_id = None;
-    oauth_with_credential.credential_id = Some("crd_01J00000000000000000000000".into());
-
-    let mut api_key_with_client = base.clone();
-    api_key_with_client.auth_method = AuthMethod::ApiKey;
-
-    let mut zero_authority = base.clone();
-    zero_authority.authority_version = 0;
-
-    let mut profile_role_mismatch = base.clone();
-    profile_role_mismatch.db_role = DatabaseProfile::BusinessAdmin.database_role().into();
-
-    for claims in [
-        no_actor,
-        both_actors,
-        oauth_with_credential,
-        api_key_with_client,
-        zero_authority,
-        profile_role_mismatch,
-    ] {
-        let token = sign_payload(claims, KID, &key);
-        assert_eq!(
-            verifier.verify(&token, expected_role, NOW),
-            Err(JwtValidationError::InvalidClaims)
-        );
-    }
+    let base = valid_claims();
+    let expected_role = base.profile.database_role();
 
     for (field, value) in [
-        ("auth_method", json!("service")),
-        ("db_profile", json!("cluster-admin")),
+        ("delegation_id", json!("dlg_01J00000000000000000000000")),
+        ("auth_method", json!("oauth")),
+        ("authority_version", json!(7)),
+        ("client_id", json!("cli_01J00000000000000000000000")),
+        ("credential_id", json!("crd_01J00000000000000000000000")),
+        ("db_role", json!("ordinary")),
+        ("db_profile", json!("ordinary")),
     ] {
         let mut claims = serde_json::to_value(base.clone()).expect("claims JSON");
         claims
@@ -274,16 +193,41 @@ fn actor_authority_profile_role_and_id_matrix_fails_closed() {
         assert_eq!(
             verifier.verify(&token, expected_role, NOW),
             Err(JwtValidationError::InvalidToken),
-            "unknown {field} must fail closed"
+            "legacy field {field} must be denied as unknown"
         );
     }
+
+    for profile in [
+        "cluster-admin",
+        "business-admin",
+        "database-developer",
+        "gomtm_ordinary",
+    ] {
+        let mut claims = serde_json::to_value(base.clone()).expect("claims JSON");
+        claims
+            .as_object_mut()
+            .expect("claims object")
+            .insert("profile".into(), json!(profile));
+        let token = sign_payload(claims, KID, &key);
+        assert_eq!(
+            verifier.verify(&token, expected_role, NOW),
+            Err(JwtValidationError::InvalidToken),
+            "unknown profile {profile} must fail closed"
+        );
+    }
+}
+
+#[test]
+fn subject_and_jti_id_matrix_fails_closed() {
+    let key = signing_key();
+    let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
+    let base = valid_claims();
+    let expected_role = base.profile.database_role();
 
     let maximum_id = "x".repeat(64);
     let mut boundary = base.clone();
     boundary.subject = maximum_id.clone();
     boundary.token_id = maximum_id.clone();
-    boundary.delegation_id = maximum_id.clone();
-    boundary.client_id = Some(maximum_id.clone());
     let token = sign_payload(boundary, KID, &key);
     verifier
         .verify(&token, expected_role, NOW)
@@ -299,13 +243,11 @@ fn actor_authority_profile_role_and_id_matrix_fails_closed() {
         for (field, expected) in [
             ("sub", JwtValidationError::InvalidIdentity),
             ("jti", JwtValidationError::InvalidClaims),
-            ("delegation_id", JwtValidationError::InvalidIdentity),
-            ("client_id", JwtValidationError::InvalidIdentity),
         ] {
-            let mut claims = serde_json::to_value(base.clone()).expect("OAuth claims JSON");
+            let mut claims = serde_json::to_value(base.clone()).expect("claims JSON");
             claims
                 .as_object_mut()
-                .expect("OAuth claims object")
+                .expect("claims object")
                 .insert(field.into(), json!(invalid_id.clone()));
             let token = sign_payload(claims, KID, &key);
             assert_eq!(
@@ -314,46 +256,6 @@ fn actor_authority_profile_role_and_id_matrix_fails_closed() {
                 "field {field} must reject ID {invalid_id:?}"
             );
         }
-
-        let mut claims =
-            serde_json::to_value(valid_api_key_claims()).expect("API-key-derived claims JSON");
-        claims
-            .as_object_mut()
-            .expect("API-key-derived claims object")
-            .insert("credential_id".into(), json!(invalid_id.clone()));
-        let token = sign_payload(claims, KID, &key);
-        assert_eq!(
-            verifier.verify(&token, expected_role, NOW),
-            Err(JwtValidationError::InvalidIdentity),
-            "credential_id must reject ID {invalid_id:?}"
-        );
-    }
-}
-
-#[test]
-fn actor_schema_rejects_explicit_null_for_the_unselected_actor() {
-    let key = signing_key();
-    let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
-    let expected_role = DatabaseProfile::Ordinary.database_role();
-
-    let mut oauth = serde_json::to_value(valid_oauth_claims()).expect("OAuth claims JSON");
-    oauth
-        .as_object_mut()
-        .expect("OAuth claims object")
-        .insert("credential_id".into(), Value::Null);
-
-    let mut api_key = serde_json::to_value(valid_api_key_claims()).expect("API key claims JSON");
-    api_key
-        .as_object_mut()
-        .expect("API key claims object")
-        .insert("client_id".into(), Value::Null);
-
-    for claims in [oauth, api_key] {
-        let token = sign_payload(claims, KID, &key);
-        assert_eq!(
-            verifier.verify(&token, expected_role, NOW),
-            Err(JwtValidationError::InvalidToken)
-        );
     }
 }
 
@@ -396,7 +298,7 @@ fn jwks_rejects_duplicate_private_or_non_es256_keys() {
 fn token_header_rejects_missing_kid_embedded_keys_urls_and_custom_fields() {
     let key = signing_key();
     let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
-    let claims = valid_oauth_claims();
+    let claims = valid_claims();
     let valid = sign_payload(claims.clone(), KID, &key);
 
     for (field, value) in [
@@ -408,7 +310,7 @@ fn token_header_rejects_missing_kid_embedded_keys_urls_and_custom_fields() {
             header.insert(field.into(), value);
         });
         assert_eq!(
-            verifier.verify(&invalid, claims.db_profile.database_role(), NOW + 1),
+            verifier.verify(&invalid, claims.profile.database_role(), NOW + 1),
             Err(JwtValidationError::InvalidHeader)
         );
     }
@@ -417,7 +319,7 @@ fn token_header_rejects_missing_kid_embedded_keys_urls_and_custom_fields() {
         header.remove("kid");
     });
     assert_eq!(
-        verifier.verify(&missing_kid, claims.db_profile.database_role(), NOW + 1,),
+        verifier.verify(&missing_kid, claims.profile.database_role(), NOW + 1,),
         Err(JwtValidationError::InvalidHeader)
     );
 }
@@ -426,11 +328,11 @@ fn token_header_rejects_missing_kid_embedded_keys_urls_and_custom_fields() {
 fn token_rejects_unknown_kid_wrong_algorithm_and_tampered_signature() {
     let key = signing_key();
     let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
-    let claims = valid_oauth_claims();
+    let claims = valid_claims();
 
     let unknown_kid = sign_payload(claims.clone(), "unknown-kid", &key);
     assert_eq!(
-        verifier.verify(&unknown_kid, claims.db_profile.database_role(), NOW + 1),
+        verifier.verify(&unknown_kid, claims.profile.database_role(), NOW + 1),
         Err(JwtValidationError::UnknownKeyId)
     );
 
@@ -439,7 +341,7 @@ fn token_rejects_unknown_kid_wrong_algorithm_and_tampered_signature() {
         header.insert("alg".into(), json!("RS256"));
     });
     assert_eq!(
-        verifier.verify(&wrong_algorithm, claims.db_profile.database_role(), NOW + 1,),
+        verifier.verify(&wrong_algorithm, claims.profile.database_role(), NOW + 1,),
         Err(JwtValidationError::InvalidHeader)
     );
 
@@ -453,7 +355,7 @@ fn token_rejects_unknown_kid_wrong_algorithm_and_tampered_signature() {
     assert_eq!(
         verifier.verify(
             &segments.join("."),
-            claims.db_profile.database_role(),
+            claims.profile.database_role(),
             NOW + 1,
         ),
         Err(JwtValidationError::InvalidSignature)
@@ -461,11 +363,11 @@ fn token_rejects_unknown_kid_wrong_algorithm_and_tampered_signature() {
 }
 
 #[test]
-fn claims_reject_wrong_resource_time_actor_and_requested_role() {
+fn claims_reject_wrong_resource_time_and_requested_role() {
     let key = signing_key();
     let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
-    let base = valid_oauth_claims();
-    let expected_role = base.db_profile.database_role();
+    let base = valid_claims();
+    let expected_role = base.profile.database_role();
 
     let mut invalid_claims = Vec::new();
 
@@ -499,14 +401,6 @@ fn claims_reject_wrong_resource_time_actor_and_requested_role() {
     ttl_too_short.expires_at = NOW + 29;
     invalid_claims.push(ttl_too_short);
 
-    let mut both_actors = base.clone();
-    both_actors.credential_id = Some("crd_01J00000000000000000000000".into());
-    invalid_claims.push(both_actors);
-
-    let mut method_mismatch = base.clone();
-    method_mismatch.auth_method = AuthMethod::ApiKey;
-    invalid_claims.push(method_mismatch);
-
     for claims in invalid_claims {
         let token = sign_payload(claims, KID, &key);
         assert_eq!(
@@ -526,14 +420,14 @@ fn claims_reject_wrong_resource_time_actor_and_requested_role() {
 fn claims_schema_rejects_missing_unknown_and_illegal_identity_fields() {
     let key = signing_key();
     let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
-    let base = valid_oauth_claims();
-    let expected_role = base.db_profile.database_role();
+    let base = valid_claims();
+    let expected_role = base.profile.database_role();
 
     let mut missing_claim = serde_json::to_value(base.clone()).expect("claims JSON");
     missing_claim
         .as_object_mut()
         .expect("claims object")
-        .remove("delegation_id");
+        .remove("profile");
     let token = sign_payload(missing_claim, KID, &key);
     assert_eq!(
         verifier.verify(&token, expected_role, NOW),
@@ -565,25 +459,27 @@ fn claims_schema_rejects_missing_unknown_and_illegal_identity_fields() {
 
 #[test]
 fn identity_codec_rejects_ambiguity_unknown_versions_and_oversize_values() {
-    let identity = AuthenticatedIdentity {
-        user_id: "usr_01J00000000000000000000000".into(),
-        actor: AuthenticatedActor::OAuthClient("cli_01J00000000000000000000000".into()),
-        delegation_id: "dlg_01J00000000000000000000000".into(),
-        auth_method: AuthMethod::OAuth,
-        authority_version: 7,
-        profile: DatabaseProfile::Ordinary,
-    };
+    let identity = ordinary_identity();
     let encoded = identity.encode_authn_id().expect("encode identity");
 
-    assert!(encoded.starts_with("pggomtm:v2;"));
+    assert_eq!(
+        encoded,
+        "candidate.example.test:v1;u=usr_01J00000000000000000000000;p=ordinary"
+    );
     assert_eq!(decode_authn_id(&encoded), Ok(identity.clone()));
     let system_user = format!("oauth:{encoded}");
     assert_eq!(decode_system_user(&system_user), Ok(identity));
-    assert!(decode_system_user(&system_user.replacen("pggomtm:v2", "pggomtm:v1", 1)).is_err());
+
+    let wrong_version = "candidate.example.test:v2;u=usr_01J00000000000000000000000;p=ordinary";
+    assert!(decode_authn_id(wrong_version).is_err());
     assert!(decode_authn_id(&encoded.replacen("p=ordinary", "p=business-admin", 1)).is_err());
-    assert!(decode_system_user(&format!("scram:{}", encoded)).is_err());
+    assert!(decode_system_user(&format!("scram:{encoded}")).is_err());
     assert!(decode_authn_id(&"x".repeat(MAX_AUTHN_ID_BYTES + 1)).is_err());
     assert!(decode_system_user(&format!("oauth:{}", "x".repeat(MAX_AUTHN_ID_BYTES + 1))).is_err());
+    assert!(decode_system_user(
+        "oauth:pggomtm:v2;u=usr;actor=client:cli;d=dlg;m=oauth;a=7;p=ordinary"
+    )
+    .is_err());
 }
 
 #[test]
@@ -602,11 +498,8 @@ fn profile_role_mapping_is_closed_and_non_inheriting() {
         );
         let identity = AuthenticatedIdentity {
             user_id: "usr_profile_mapping".into(),
-            actor: AuthenticatedActor::OAuthClient("cli_profile_mapping".into()),
-            delegation_id: "dlg_profile_mapping".into(),
-            auth_method: AuthMethod::OAuth,
-            authority_version: 1,
             profile,
+            issuer_host: ISSUER_HOST.into(),
         };
         assert!(
             identity
@@ -618,45 +511,46 @@ fn profile_role_mapping_is_closed_and_non_inheriting() {
 }
 
 #[test]
-fn v1_profiles_and_prefixed_roles_fail_closed() {
+fn hyphenated_profiles_and_prefixed_roles_fail_closed() {
     let key = signing_key();
     let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
-    let base = valid_oauth_claims();
+    let base = valid_claims();
 
-    for (profile, role) in [
-        ("business-admin", "gomtm_candidate_business_admin"),
-        ("database-developer", "gomtm_candidate_database_developer"),
-    ] {
+    for profile in ["business-admin", "database-developer"] {
         let mut claims = serde_json::to_value(base.clone()).expect("claims JSON");
-        let object = claims.as_object_mut().expect("claims object");
-        object.insert("db_profile".into(), json!(profile));
-        object.insert("db_role".into(), json!(role));
+        claims
+            .as_object_mut()
+            .expect("claims object")
+            .insert("profile".into(), json!(profile));
         let token = sign_payload(claims, KID, &key);
         assert_eq!(
-            verifier.verify(&token, role, NOW),
+            verifier.verify(&token, profile, NOW),
             Err(JwtValidationError::InvalidToken),
-            "v1 profile {profile} must not enter the v2 contract"
+            "hyphenated profile {profile} must not enter the v1 contract"
         );
     }
 
-    for role in ["gomtm_candidate_ordinary", "gomtm_ordinary"] {
-        let mut claims = base.clone();
-        claims.db_role = role.into();
-        let token = sign_payload(claims, KID, &key);
+    let ordinary_token = sign_payload(base.clone(), KID, &key);
+    for role in [
+        "gomtm_candidate_ordinary",
+        "gomtm_ordinary",
+        "gomtm_candidate_business_admin",
+        "gomtm_platform_admin",
+    ] {
         assert_eq!(
-            verifier.verify(&token, role, NOW),
-            Err(JwtValidationError::InvalidClaims),
-            "prefixed role {role} must not enter the v2 contract"
+            verifier.verify(&ordinary_token, role, NOW),
+            Err(JwtValidationError::RequestedRoleMismatch),
+            "prefixed role {role} must not override the signed profile"
         );
     }
 }
 
 #[test]
-fn signed_or_requested_service_migration_cluster_and_unknown_roles_fail_closed() {
+fn requested_service_migration_cluster_and_unknown_roles_fail_closed() {
     let key = signing_key();
     let verifier = verifier(&jwks_with(vec![jwk_value(&key, KID)]));
-    let base = valid_oauth_claims();
-    let ordinary_token = sign_payload(base.clone(), KID, &key);
+    let base = valid_claims();
+    let ordinary_token = sign_payload(base, KID, &key);
 
     for forbidden_role in [
         DatabaseProfile::BusinessAdmin.database_role(),
@@ -665,20 +559,14 @@ fn signed_or_requested_service_migration_cluster_and_unknown_roles_fail_closed()
         "gomtm_test_migration_owner",
         "gomtm_platform_admin",
         "gomtm_candidate_unknown",
+        "service",
+        "migration",
+        "cluster-admin",
     ] {
         assert_eq!(
             verifier.verify(&ordinary_token, forbidden_role, NOW),
             Err(JwtValidationError::RequestedRoleMismatch),
             "requested role {forbidden_role} must not override the signed profile"
-        );
-
-        let mut claims = base.clone();
-        claims.db_role = forbidden_role.into();
-        let token = sign_payload(claims, KID, &key);
-        assert_eq!(
-            verifier.verify(&token, forbidden_role, NOW),
-            Err(JwtValidationError::InvalidClaims),
-            "signed role {forbidden_role} must not expand the closed profile mapping"
         );
     }
 }
