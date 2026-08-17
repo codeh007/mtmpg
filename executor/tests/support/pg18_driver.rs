@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use reqwest::{Certificate, StatusCode};
@@ -411,12 +411,21 @@ fn headers(timestamp: i64, nonce: &str, signature: &str) -> Result<HeaderMap, Bo
 
 fn sign(secret: &[u8], timestamp: i64, nonce: &str, body: &[u8]) -> Result<String, IoError> {
     let digest = Sha256::digest(body);
+    let digest_hex = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     let canonical =
-        format!("{WIRE_VERSION}\nPOST\n{EXECUTE_PATH}\n{timestamp}\n{nonce}\n{digest:x}");
+        format!("{WIRE_VERSION}\nPOST\n{EXECUTE_PATH}\n{timestamp}\n{nonce}\n{digest_hex}");
     let mut mac =
         HmacSha256::new_from_slice(secret).map_err(|_| invalid_data("invalid HMAC test secret"))?;
     mac.update(canonical.as_bytes());
-    Ok(format!("{:x}", mac.finalize().into_bytes()))
+    Ok(mac
+        .finalize()
+        .into_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 fn decode_response(response: Response) -> Result<(StatusCode, Value), Box<dyn Error>> {

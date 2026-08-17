@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
@@ -60,9 +60,18 @@ impl HmacAuthenticator {
         let signature =
             decode_signature(request.signature).ok_or(AuthenticationError::Unauthorized)?;
         let body_digest = Sha256::digest(request.body);
+        let body_digest_hex = body_digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
         let canonical = format!(
-            "{}\n{}\n{}\n{}\n{}\n{body_digest:x}",
-            request.version, request.method, request.path, request.timestamp, request.nonce
+            "{}\n{}\n{}\n{}\n{}\n{}",
+            request.version,
+            request.method,
+            request.path,
+            request.timestamp,
+            request.nonce,
+            body_digest_hex,
         );
         let mut mac = HmacSha256::new_from_slice(&self.secret)
             .map_err(|_| AuthenticationError::Unauthorized)?;
