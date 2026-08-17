@@ -1,13 +1,13 @@
 ## 1. 规划与基线
 
 - [x] 1.1 读取 AGENTS/MAINTAINERS/docs/openspec 现状，确认 3 个 active change 与 executor 边界
-- [x] 1.2 建立 worktree 与分支 slim-validator-only（base=origin/main fba114e）
+- [x] 1.2 建立 worktree 与分支 slim-validator-only（base=origin/main fba114e，rebase 到 1d407dc）
 - [x] 1.3 创建本 openspec change 并完成 proposal/design/specs/tasks
 
 ## 2. 删除 executor 产品
 
 - [x] 2.1 删除 executor/ 目录（源码+测试+Dockerfile）
-- [x] 2.2 根 Cargo.toml 移除 executor workspace 成员
+- [x] 2.2 根 Cargo.toml 移除 executor workspace 成员（并移除孤儿 dev-dep sha2）
 - [x] 2.3 .github/workflows/ci.yml 移除 executor CI 步骤（executor_domain/executor_pg18/executor_image 及 validator 内 executor 解析/libpq probe）
 - [x] 2.4 .github/workflows/release.yml 移除 executor-v* release 入口与 publish 内 executor 分支
 - [x] 2.5 根 Dockerfile 与 .dockerignore 移除 executor COPY/白名单
@@ -35,7 +35,14 @@
 
 ## 6. 验证与交付
 
-- [x] 6.1 openspec validate --strict 通过
+- [x] 6.1 openspec validate --strict 通过（4 change + 2 spec 全绿）
 - [x] 6.2 自审 diff（最小变更、无无关重构）
-- [ ] 6.3 提交、推送分支、gh pr create（label enhancement+rust）
-- [ ] 6.4 轮询 CI 至全绿（失败只向前修复）
+- [x] 6.3 提交、推送分支、gh pr create（PR #11，label enhancement+rust）
+- [x] 6.4 轮询 CI 至全绿（失败只向前修复）
+
+## 验证证据
+
+- PR：https://github.com/codeh007/mtmpg/pull/11
+- GREEN run：https://github.com/codeh007/mtmpg/actions/runs/32011254449（head bdbae1d，conclusion success）
+- 首次 RED（cargo fmt）：run 32010963197，两处 jwt_identity.rs 格式差异，追加 commit bdbae1d 修复后转绿
+- 分支：slim-validator-only（base main 1d407dc，经 rebase 解决 executor modify/delete 冲突，无 force push）
