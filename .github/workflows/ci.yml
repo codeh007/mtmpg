@@ -63,7 +63,6 @@ jobs:
       release_artifact: ${{ steps.release-artifact.outputs.name }}
       source: ${{ github.sha }}
       validator_version: ${{ steps.resolve.outputs.validator_version }}
-      executor_version: ${{ steps.resolve.outputs.executor_version }}
 
     steps:
       - name: Checkout exact source
@@ -127,10 +126,8 @@ jobs:
 
           docker pull rust:bookworm >/dev/null
           docker pull postgres:18-bookworm >/dev/null
-          docker pull debian:bookworm-slim >/dev/null
           rust_image="$(docker image inspect --format '{{ index .RepoDigests 0 }}' rust:bookworm)"
           postgres_image="$(docker image inspect --format '{{ index .RepoDigests 0 }}' postgres:18-bookworm)"
-          executor_runtime_image="$(docker image inspect --format '{{ index .RepoDigests 0 }}' debian:bookworm-slim)"
           host_rust="$(rustc --version)"
           image_rust="$(docker run --rm --entrypoint rustc "$rust_image" --version)"
           test "$host_rust" = "$image_rust"
@@ -147,20 +144,11 @@ jobs:
               | jq --exit-status --raw-output \
                   '[.packages[] | select(.name == "pggomtm") | .version] | if length == 1 then .[0] else error("expected exactly one pggomtm package") end'
           )"
-          executor_version="$(
-            cargo metadata --locked --no-deps --format-version 1 \
-              | jq --exit-status --raw-output \
-                  '[.packages[] | select(.name == "mtmpg-executor") | .version] | if length == 1 then .[0] else error("expected exactly one executor package") end'
-          )"
           resolved_version="$validator_version"
           if test "$UPLOAD_RELEASE_ARTIFACTS" = true; then
             test -n "$REQUESTED_RELEASE_VERSION"
             case "$REQUESTED_RELEASE_PRODUCT" in
               validator) test "$REQUESTED_RELEASE_VERSION" = "$validator_version" ;;
-              executor)
-                test "$REQUESTED_RELEASE_VERSION" = "$executor_version"
-                resolved_version="$executor_version"
-                ;;
               *) exit 1 ;;
             esac
           else
@@ -181,7 +169,6 @@ jobs:
             --arg version "$resolved_version" \
             --arg release_product "$REQUESTED_RELEASE_PRODUCT" \
             --arg validator_version "$validator_version" \
-            --arg executor_version "$executor_version" \
             --arg rust "$host_rust" \
             --arg cargo "$(cargo --version)" \
             --arg pgrx "$pgrx_version" \
@@ -189,7 +176,6 @@ jobs:
             --arg pg_config "$host_postgres" \
             --arg rust_image "$rust_image" \
             --arg postgres_image "$postgres_image" \
-            --arg executor_runtime_image "$executor_runtime_image" \
             --arg lock_sha256 "$lock_sha256" \
             --arg header_sha256 "$header_sha256" \
             --arg client_header_sha256 "$client_header_sha256" \
@@ -200,8 +186,7 @@ jobs:
               version: $version,
               release_product: (if $release_product == "" then null else $release_product end),
               products: {
-                validator: {version: $validator_version},
-                executor: {version: $executor_version, runtime: $executor_runtime_image}
+                validator: {version: $validator_version}
               },
               rust: {compiler: $rust, cargo: $cargo, builder: $rust_image},
               pgrx: $pgrx,
@@ -220,12 +205,9 @@ jobs:
             echo "POSTGRES_IMAGE=$postgres_image"
             echo "POSTGRES_MINOR=$host_minor"
             echo "MTMPG_VERSION=$validator_version"
-            echo "EXECUTOR_RUNTIME_IMAGE=$executor_runtime_image"
-            echo "EXECUTOR_VERSION=$executor_version"
           } >>"$GITHUB_ENV"
           {
             echo "validator_version=$validator_version"
-            echo "executor_version=$executor_version"
           } >>"$GITHUB_OUTPUT"
 
       - name: Name shared input artifact
@@ -263,13 +245,6 @@ jobs:
             tests/oauth_layout_probe.c \
             -o "$RUNNER_TEMP/pggomtm-oauth-layout-probe"
           "$RUNNER_TEMP/pggomtm-oauth-layout-probe"
-
-          client_include_dir="$("$PGRX_PG_CONFIG_PATH" --includedir)"
-          cc -std=c11 -Wall -Wextra -Werror \
-            -I"$client_include_dir" \
-            executor/tests/libpq_layout_probe.c \
-            -o "$RUNNER_TEMP/mtmpg-executor-libpq-layout-probe"
-          "$RUNNER_TEMP/mtmpg-executor-libpq-layout-probe"
 
       - name: Run Rust quality and domain tests
         shell: bash
@@ -380,345 +355,10 @@ jobs:
           retention-days: 1
           compression-level: 0
 
-  executor_domain:
-    name: Executor Rust domain
-    needs: validator
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      PGRX_PG_CONFIG_PATH: /usr/lib/postgresql/18/bin/pg_config
-
-    steps:
-      - name: Checkout exact source
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Download shared resolved inputs
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ needs.validator.outputs.inputs_artifact }}
-          path: ${{ runner.temp }}/resolved-inputs
-
-      - name: Install resolved toolchain inputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            clang \
-            curl \
-            gnupg \
-            jq \
-            libclang-dev \
-            libssl-dev \
-            pkg-config
-          curl --fail --location --proto '=https' --tlsv1.2 \
-            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-            | sudo gpg --dearmor --batch --yes \
-                --output /usr/share/keyrings/postgresql.gpg
-          . /etc/os-release
-          echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            postgresql-client-18 \
-            postgresql-server-dev-18
-
-          install -m 0644 \
-            "$RUNNER_TEMP/resolved-inputs/Cargo.lock" \
-            Cargo.lock
-          install -m 0644 \
-            "$RUNNER_TEMP/resolved-inputs/resolved-inputs.json" \
-            resolved-inputs.json
-          test "$(sha256sum Cargo.lock | cut -d' ' -f1)" = \
-            "$(jq --raw-output '.cargo_lock_sha256' resolved-inputs.json)"
-          test "$("$PGRX_PG_CONFIG_PATH" --version | grep --only-matching --extended-regexp '18\.[0-9]+' | head -n 1)" = \
-            "$(jq --raw-output '.postgresql.minor' resolved-inputs.json)"
-
-          rustup set profile minimal
-          rustup update stable --no-self-update
-          rustup default stable
-          rustup component add clippy rustfmt
-          test "$(rustc --version)" = "$(jq --raw-output '.rust.compiler' resolved-inputs.json)"
-          test "$(cargo --version)" = "$(jq --raw-output '.rust.cargo' resolved-inputs.json)"
-
-      - name: Run executor domain gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo fmt --all -- --check
-          cargo clippy --locked --package mtmpg-executor --all-targets -- -D warnings
-          cargo test --locked --package mtmpg-executor
-
-  executor_pg18:
-    name: Executor real PG18
-    needs: validator
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      PGRX_PG_CONFIG_PATH: /usr/lib/postgresql/18/bin/pg_config
-
-    steps:
-      - name: Checkout exact source
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Download shared resolved inputs
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ needs.validator.outputs.inputs_artifact }}
-          path: ${{ runner.temp }}/resolved-inputs
-
-      - name: Install resolved integration inputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            clang \
-            curl \
-            gnupg \
-            jq \
-            libclang-dev \
-            libkrb5-dev \
-            libssl-dev \
-            pkg-config \
-            shellcheck
-          curl --fail --location --proto '=https' --tlsv1.2 \
-            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-            | sudo gpg --dearmor --batch --yes \
-                --output /usr/share/keyrings/postgresql.gpg
-          . /etc/os-release
-          echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            postgresql-client-18 \
-            postgresql-server-dev-18
-
-          install -m 0644 \
-            "$RUNNER_TEMP/resolved-inputs/Cargo.lock" \
-            Cargo.lock
-          install -m 0644 \
-            "$RUNNER_TEMP/resolved-inputs/resolved-inputs.json" \
-            resolved-inputs.json
-          test "$(sha256sum Cargo.lock | cut -d' ' -f1)" = \
-            "$(jq --raw-output '.cargo_lock_sha256' resolved-inputs.json)"
-          test "$("$PGRX_PG_CONFIG_PATH" --version | grep --only-matching --extended-regexp '18\.[0-9]+' | head -n 1)" = \
-            "$(jq --raw-output '.postgresql.minor' resolved-inputs.json)"
-
-          rustup set profile minimal
-          rustup update stable --no-self-update
-          rustup default stable
-          test "$(rustc --version)" = "$(jq --raw-output '.rust.compiler' resolved-inputs.json)"
-          test "$(cargo --version)" = "$(jq --raw-output '.rust.cargo' resolved-inputs.json)"
-
-          {
-            echo "RUST_IMAGE=$(jq --raw-output '.rust.builder' resolved-inputs.json)"
-            echo "POSTGRES_MINOR=$(jq --raw-output '.postgresql.minor' resolved-inputs.json)"
-          } >>"$GITHUB_ENV"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Verify executor integration harness
-        shell: bash
-        run: |
-          set -euo pipefail
-          shellcheck tests/*.sh executor/tests/*.sh
-
-      - name: Stage executor integration artifacts
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./executor/Dockerfile
-          target: integration-artifacts
-          platforms: linux/amd64
-          pull: true
-          push: false
-          provenance: false
-          sbom: false
-          outputs: type=local,dest=${{ runner.temp }}/executor-integration
-          build-args: |
-            RUST_IMAGE=${{ env.RUST_IMAGE }}
-            POSTGRES_MINOR=${{ env.POSTGRES_MINOR }}
-          cache-from: type=gha,scope=mtmpg-executor-ci
-          cache-to: type=gha,mode=max,scope=mtmpg-executor-ci
-
-      - name: Run executor real PG18 matrix
-        shell: bash
-        run: |
-          set -euo pipefail
-          postgres_image="$(jq --raw-output '.postgresql.runtime' resolved-inputs.json)"
-          test -n "$postgres_image"
-          PGGOMTM_POSTGRES_IMAGE="$postgres_image" \
-            tests/postgres_integration.sh \
-              run-executor \
-              "$RUNNER_TEMP/executor-integration/artifacts"
-
-  executor_image:
-    name: Executor final image
-    needs:
-      - validator
-      - executor_domain
-      - executor_pg18
-    runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    outputs:
-      release_artifact: ${{ steps.release-artifact.outputs.name }}
-
-    steps:
-      - name: Checkout exact source
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Download shared resolved inputs
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ needs.validator.outputs.inputs_artifact }}
-          path: ${{ runner.temp }}/resolved-inputs
-
-      - name: Install image verification inputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends ca-certificates curl jq skopeo
-          install -m 0644 \
-            "$RUNNER_TEMP/resolved-inputs/Cargo.lock" \
-            Cargo.lock
-          install -m 0644 \
-            "$RUNNER_TEMP/resolved-inputs/resolved-inputs.json" \
-            resolved-inputs.json
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(jq --raw-output '.source' resolved-inputs.json)" = "$GITHUB_SHA"
-          test "$(sha256sum Cargo.lock | cut -d' ' -f1)" = \
-            "$(jq --raw-output '.cargo_lock_sha256' resolved-inputs.json)"
-
-          {
-            echo "RUST_IMAGE=$(jq --raw-output '.rust.builder' resolved-inputs.json)"
-            echo "POSTGRES_IMAGE=$(jq --raw-output '.postgresql.runtime' resolved-inputs.json)"
-            echo "POSTGRES_MINOR=$(jq --raw-output '.postgresql.minor' resolved-inputs.json)"
-            echo "EXECUTOR_RUNTIME_IMAGE=$(jq --raw-output '.products.executor.runtime' resolved-inputs.json)"
-            echo "EXECUTOR_VERSION=$(jq --raw-output '.products.executor.version' resolved-inputs.json)"
-          } >>"$GITHUB_ENV"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Stage final-image integration artifacts
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./executor/Dockerfile
-          target: integration-artifacts
-          platforms: linux/amd64
-          pull: true
-          push: false
-          provenance: false
-          sbom: false
-          outputs: type=local,dest=${{ runner.temp }}/executor-final-integration
-          build-args: |
-            RUST_IMAGE=${{ env.RUST_IMAGE }}
-            POSTGRES_MINOR=${{ env.POSTGRES_MINOR }}
-          cache-from: type=gha,scope=mtmpg-executor-ci
-          cache-to: type=gha,mode=max,scope=mtmpg-executor-ci
-
-      - name: Build executor production OCI archive once
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./executor/Dockerfile
-          platforms: linux/amd64
-          pull: true
-          push: false
-          provenance: false
-          sbom: false
-          outputs: type=oci,dest=${{ runner.temp }}/mtmpg-executor.oci.tar
-          build-args: |
-            RUST_IMAGE=${{ env.RUST_IMAGE }}
-            RUNTIME_IMAGE=${{ env.EXECUTOR_RUNTIME_IMAGE }}
-            POSTGRES_MINOR=${{ env.POSTGRES_MINOR }}
-            SOURCE_REVISION=${{ github.sha }}
-            VERSION=${{ env.EXECUTOR_VERSION }}
-          cache-from: type=gha,scope=mtmpg-executor-ci
-          cache-to: type=gha,mode=max,scope=mtmpg-executor-ci
-
-      - name: Verify the exact executor production image
-        shell: bash
-        run: |
-          set -euo pipefail
-          image="mtmpg-executor-ci:$GITHUB_SHA"
-          archive="$RUNNER_TEMP/mtmpg-executor.oci.tar"
-          integration_root="$RUNNER_TEMP/executor-final-integration/artifacts"
-          skopeo copy \
-            "oci-archive:$archive" \
-            "docker-daemon:$image"
-          PGGOMTM_POSTGRES_IMAGE="$POSTGRES_IMAGE" \
-            executor/tests/image-readiness.sh \
-              "$image" \
-              "$GITHUB_SHA" \
-              "$EXECUTOR_VERSION" \
-              "$integration_root"
-
-          jq --null-input \
-            --arg source "$GITHUB_SHA" \
-            --arg version "$EXECUTOR_VERSION" \
-            --arg resolved_inputs_sha256 "$(sha256sum resolved-inputs.json | cut -d' ' -f1)" \
-            --arg cargo_lock_sha256 "$(sha256sum Cargo.lock | cut -d' ' -f1)" \
-            --arg binary_sha256 "$(sha256sum "$integration_root/mtmpg-executor" | cut -d' ' -f1)" \
-            --arg oci_archive_sha256 "$(sha256sum "$archive" | cut -d' ' -f1)" \
-            --arg oci_manifest_digest "$(skopeo inspect --format '{{.Digest}}' "oci-archive:$archive")" \
-            '{
-              schema: "mtmpg-executor-verified-image/v1",
-              product: "executor",
-              source: $source,
-              version: $version,
-              resolved_inputs_sha256: $resolved_inputs_sha256,
-              cargo_lock_sha256: $cargo_lock_sha256,
-              binary_sha256: $binary_sha256,
-              oci_archive_sha256: $oci_archive_sha256,
-              oci_manifest_digest: $oci_manifest_digest
-            }' >verified-image.json
-
-          material_root="$RUNNER_TEMP/executor-release-materials"
-          install -d -m 0755 "$material_root"
-          install -m 0644 \
-            Cargo.lock \
-            resolved-inputs.json \
-            verified-image.json \
-            "$material_root"
-          mv "$archive" "$material_root/mtmpg-executor.oci.tar"
-          chmod 0644 "$material_root/mtmpg-executor.oci.tar"
-
-      - name: Name executor release artifact
-        id: release-artifact
-        shell: bash
-        run: echo "name=mtmpg-executor-release-${GITHUB_SHA}-${GITHUB_RUN_ATTEMPT}" >>"$GITHUB_OUTPUT"
-
-      - name: Upload verified executor release materials
-        if: ${{ inputs.upload_release_artifacts == true && inputs.release_product == 'executor' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ steps.release-artifact.outputs.name }}
-          path: ${{ runner.temp }}/executor-release-materials/
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
-
   release_selection:
     name: Select release product
     needs:
       - validator
-      - executor_image
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -731,8 +371,6 @@ jobs:
       - name: Select verified product materials
         id: select
         env:
-          EXECUTOR_ARTIFACT: ${{ needs.executor_image.outputs.release_artifact }}
-          EXECUTOR_VERSION: ${{ needs.validator.outputs.executor_version }}
           RELEASE_PRODUCT: ${{ inputs.release_product || '' }}
           VALIDATOR_ARTIFACT: ${{ needs.validator.outputs.release_artifact }}
           VALIDATOR_VERSION: ${{ needs.validator.outputs.validator_version }}
@@ -740,10 +378,6 @@ jobs:
         run: |
           set -euo pipefail
           case "$RELEASE_PRODUCT" in
-            executor)
-              release_artifact="$EXECUTOR_ARTIFACT"
-              version="$EXECUTOR_VERSION"
-              ;;
             validator)
               release_artifact="$VALIDATOR_ARTIFACT"
               version="$VALIDATOR_VERSION"
@@ -766,9 +400,6 @@ jobs:
     if: ${{ always() }}
     needs:
       - validator
-      - executor_domain
-      - executor_pg18
-      - executor_image
       - release_selection
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -776,16 +407,10 @@ jobs:
     steps:
       - name: Require every product gate
         env:
-          EXECUTOR_DOMAIN_RESULT: ${{ needs.executor_domain.result }}
-          EXECUTOR_IMAGE_RESULT: ${{ needs.executor_image.result }}
-          EXECUTOR_PG18_RESULT: ${{ needs.executor_pg18.result }}
           RELEASE_SELECTION_RESULT: ${{ needs.release_selection.result }}
           VALIDATOR_RESULT: ${{ needs.validator.result }}
         shell: bash
         run: |
           set -euo pipefail
           test "$VALIDATOR_RESULT" = success
-          test "$EXECUTOR_DOMAIN_RESULT" = success
-          test "$EXECUTOR_PG18_RESULT" = success
-          test "$EXECUTOR_IMAGE_RESULT" = success
           test "$RELEASE_SELECTION_RESULT" = success

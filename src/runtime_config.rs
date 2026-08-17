@@ -252,9 +252,7 @@ mod tests {
         MAX_PUBLIC_JWKS_BYTES, MAX_VALIDATOR_CONFIG_BYTES, PUBLIC_JWKS_PATH, RuntimeConfigError,
         VALIDATOR_CONFIG_PATH, ValidatorSnapshot, load_validator_snapshot_from_paths,
     };
-    use crate::database_auth::{
-        AuthMethod, DatabaseProfile, DatabaseTokenClaims, JwtValidationError,
-    };
+    use crate::database_auth::{DatabaseProfile, DatabaseTokenClaims, JwtValidationError};
 
     const ISSUER: &str = "https://candidate.example.test/oauth/database";
     const AUDIENCE: &str = "https://candidate.example.test/resources/database/gomtm-test";
@@ -558,13 +556,7 @@ mod tests {
             expires_at: NOW + 120,
             token_id: "jti_snapshot_gate".into(),
             scope: "database".into(),
-            delegation_id: "dlg_snapshot_gate".into(),
-            auth_method: AuthMethod::OAuth,
-            authority_version: 1,
-            db_profile: DatabaseProfile::Ordinary,
-            db_role: DatabaseProfile::Ordinary.database_role().into(),
-            client_id: Some("cli_snapshot_gate".into()),
-            credential_id: None,
+            profile: DatabaseProfile::Ordinary,
         };
         let mut token = Token::compact((), claims);
         *token.header_mut().key_id() = Some(kid.into());

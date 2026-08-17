@@ -9,19 +9,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use jaws::Token;
 use p256::ecdsa::{Signature, SigningKey};
 use pggomtm::database_auth::{
-    AuthMethod, AuthenticatedActor, AuthenticatedIdentity, DatabaseProfile, DatabaseTokenClaims,
-    MAX_AUTHN_ID_BYTES, decode_system_user,
+    AuthenticatedIdentity, DatabaseProfile, DatabaseTokenClaims, MAX_AUTHN_ID_BYTES,
+    decode_system_user,
 };
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 const ISSUER: &str = "https://candidate.example.test/oauth/database";
 const AUDIENCE: &str = "https://candidate.example.test/resources/database/gomtm-test";
 const KID: &str = "candidate-es256-pgx-gate";
 const SCENARIO: &str = "oauth-ordinary";
 const SUBJECT: &str = "usr_oauth_ordinary";
-const CLIENT_ID: &str = "cli_oauth_ordinary";
-const DELEGATION_ID: &str = "dlg_oauth_ordinary";
+const ISSUER_HOST: &str = "candidate.example.test";
 
 fn ordinary_claims(now: i64) -> DatabaseTokenClaims {
     DatabaseTokenClaims {
@@ -32,24 +31,15 @@ fn ordinary_claims(now: i64) -> DatabaseTokenClaims {
         expires_at: now.saturating_add(299),
         token_id: format!("jti_{SCENARIO}"),
         scope: "database".into(),
-        delegation_id: DELEGATION_ID.into(),
-        auth_method: AuthMethod::OAuth,
-        authority_version: 1,
-        db_profile: DatabaseProfile::Ordinary,
-        db_role: DatabaseProfile::Ordinary.database_role().into(),
-        client_id: Some(CLIENT_ID.into()),
-        credential_id: None,
+        profile: DatabaseProfile::Ordinary,
     }
 }
 
 fn ordinary_identity() -> AuthenticatedIdentity {
     AuthenticatedIdentity {
         user_id: SUBJECT.into(),
-        actor: AuthenticatedActor::OAuthClient(CLIENT_ID.into()),
-        delegation_id: DELEGATION_ID.into(),
-        auth_method: AuthMethod::OAuth,
-        authority_version: 1,
         profile: DatabaseProfile::Ordinary,
+        issuer_host: ISSUER_HOST.into(),
     }
 }
 
@@ -106,16 +96,16 @@ fn generate_fixtures(output_dir: &Path) -> Result<(), Box<dyn Error>> {
         ordinary_oauth_token.as_bytes(),
     )?;
 
-    for (scenario, profile, role) in [
+    for (scenario, field, value) in [
         (
-            "oauth-v1-profile",
-            "business-admin",
-            "gomtm_candidate_business_admin",
+            "oauth-legacy-delegation",
+            "delegation_id",
+            json!("dlg_oauth_ordinary"),
         ),
-        ("oauth-project-role", "ordinary", "gomtm_ordinary"),
-        ("oauth-stage-role", "ordinary", "gomtm_candidate_ordinary"),
+        ("oauth-legacy-role", "db_role", json!("ordinary")),
+        ("oauth-legacy-profile", "db_profile", json!("ordinary")),
     ] {
-        let token = sign_named_claims(now, profile, role, &key)?;
+        let token = sign_claims_with_extra_field(now, field, value, &key)?;
         write_ephemeral_fixture(
             &output_dir.join(format!("{scenario}.jwt")),
             token.as_bytes(),
@@ -141,18 +131,17 @@ fn generate_fixtures(output_dir: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn sign_named_claims(
+fn sign_claims_with_extra_field(
     now: i64,
-    profile: &str,
-    role: &str,
+    field: &str,
+    value: Value,
     key: &SigningKey,
 ) -> Result<String, Box<dyn Error>> {
     let mut claims = serde_json::to_value(ordinary_claims(now))?;
     let object = claims
         .as_object_mut()
         .ok_or_else(|| invalid_input("database claims must be a JSON object"))?;
-    object.insert("db_profile".into(), Value::String(profile.into()));
-    object.insert("db_role".into(), Value::String(role.into()));
+    object.insert(field.into(), value);
     sign_claims(claims, key)
 }
 

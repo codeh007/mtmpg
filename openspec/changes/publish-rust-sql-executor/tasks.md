@@ -1,3 +1,5 @@
+> ⚠️ 本 change 已被 gomtm issue #310 硬切取代：executor 产品整个删除（见 change `slim-validator-only-database-token-v1`）。以下任务不再执行，保留本文件作为不可变历史。
+
 ## 1. 固化双产品仓库边界
 
 - [x] 1.1 更新`AGENTS.md`、README与维护文档，明确一个workspace、根validator package、唯一`executor/` package、独立image/tag/version及消费者不构建边界

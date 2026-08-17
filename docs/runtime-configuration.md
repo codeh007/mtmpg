@@ -61,7 +61,7 @@ Config只选择唯一issuer、唯一audience和固定public JWKS文件。以下�
 - Signing private key、API key、OAuth bearer、database JSON Web Token（JWT）、service credential或连接串
 - Signal、reload、共享cache或既有backend重新认证选项
 
-V0.2.x的database-token contract v2固定ES256、P-256、`use=sig`、`key_ops=["verify"]`、`database` scope、30s至300s TTL，并只允许`ordinary`、`business_admin`和`database_developer`三个profile-role同名值。Runtime config schema仍是`pggomtm-validator-config/v1`，因为配置字段和解析语义没有变化。改变任一固定策略都需要新的module和consumer contract版本，不能通过修改JSON扩权。
+V0.3.x的database-token contract v1固定ES256、P-256、`use=sig`、`key_ops=["verify"]`、`database` scope、30s至300s TTL，claims 只允许`iss`/`aud`/`sub`/`iat`/`exp`/`jti`/`scope`/`profile`，并只允许`ordinary`、`business_admin`和`database_developer`三个`profile`同名值作为数据库角色。Runtime config schema仍是`pggomtm-validator-config/v1`，因为配置字段和解析语义没有变化。改变任一固定策略都需要新的module和consumer contract版本，不能通过修改JSON扩权。
 
 ## 原子发布public材料
 

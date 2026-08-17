@@ -24,7 +24,7 @@ const MAX_INTERNAL_ID_BYTES: usize = 64;
 const MAX_KEY_ID_BYTES: usize = 128;
 const DATABASE_SCOPE: &str = "database";
 const SYSTEM_USER_PREFIX: &str = "oauth:";
-const AUTHN_ID_PREFIX: &str = "pggomtm:v2";
+const AUTHN_ID_VERSION: &str = "v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JwtValidationError {
@@ -108,35 +108,6 @@ impl DatabaseTokenPolicy {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum AuthMethod {
-    #[serde(rename = "oauth")]
-    OAuth,
-    #[serde(rename = "api_key")]
-    ApiKey,
-}
-
-impl AuthMethod {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::OAuth => "oauth",
-            Self::ApiKey => "api_key",
-        }
-    }
-}
-
-impl FromStr for AuthMethod {
-    type Err = JwtValidationError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "oauth" => Ok(Self::OAuth),
-            "api_key" => Ok(Self::ApiKey),
-            _ => Err(JwtValidationError::InvalidIdentity),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum DatabaseProfile {
     #[serde(rename = "ordinary")]
     Ordinary,
@@ -179,34 +150,20 @@ impl FromStr for DatabaseProfile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AuthenticatedActor {
-    OAuthClient(String),
-    ApiKeyCredential(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthenticatedIdentity {
     pub user_id: String,
-    pub actor: AuthenticatedActor,
-    pub delegation_id: String,
-    pub auth_method: AuthMethod,
-    pub authority_version: u64,
     pub profile: DatabaseProfile,
+    pub issuer_host: String,
 }
 
 impl AuthenticatedIdentity {
     pub fn encode_authn_id(&self) -> Result<String, JwtValidationError> {
         validate_identity(self)?;
-        let (actor_kind, actor_id) = match &self.actor {
-            AuthenticatedActor::OAuthClient(id) => ("client", id.as_str()),
-            AuthenticatedActor::ApiKeyCredential(id) => ("credential", id.as_str()),
-        };
         let encoded = format!(
-            "{AUTHN_ID_PREFIX};u={};actor={actor_kind}:{actor_id};d={};m={};a={};p={}",
+            "{}:{};u={};p={}",
+            self.issuer_host,
+            AUTHN_ID_VERSION,
             self.user_id,
-            self.delegation_id,
-            self.auth_method.as_str(),
-            self.authority_version,
             self.profile.as_str(),
         );
 
@@ -234,30 +191,7 @@ pub struct DatabaseTokenClaims {
     #[serde(rename = "jti")]
     pub token_id: String,
     pub scope: String,
-    pub delegation_id: String,
-    pub auth_method: AuthMethod,
-    pub authority_version: u64,
-    pub db_profile: DatabaseProfile,
-    pub db_role: String,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_present_actor_id"
-    )]
-    pub client_id: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_present_actor_id"
-    )]
-    pub credential_id: Option<String>,
-}
-
-fn deserialize_present_actor_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    String::deserialize(deserializer).map(Some)
+    pub profile: DatabaseProfile,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -348,38 +282,24 @@ pub fn decode_authn_id(value: &str) -> Result<AuthenticatedIdentity, JwtValidati
     }
 
     let parts = value.split(';').collect::<Vec<_>>();
-    if parts.len() != 7 || parts[0] != AUTHN_ID_PREFIX {
+    if parts.len() != 3 {
+        return Err(JwtValidationError::InvalidIdentity);
+    }
+
+    let (issuer_host, version) = parts[0]
+        .rsplit_once(':')
+        .ok_or(JwtValidationError::InvalidIdentity)?;
+    if issuer_host.is_empty() || version != AUTHN_ID_VERSION {
         return Err(JwtValidationError::InvalidIdentity);
     }
 
     let user_id = required_part(parts[1], "u=")?.to_owned();
-    let actor_value = required_part(parts[2], "actor=")?;
-    let (actor_kind, actor_id) = actor_value
-        .split_once(':')
-        .ok_or(JwtValidationError::InvalidIdentity)?;
-    let actor = match actor_kind {
-        "client" => AuthenticatedActor::OAuthClient(actor_id.to_owned()),
-        "credential" => AuthenticatedActor::ApiKeyCredential(actor_id.to_owned()),
-        _ => return Err(JwtValidationError::InvalidIdentity),
-    };
-    let delegation_id = required_part(parts[3], "d=")?.to_owned();
-    let auth_method = required_part(parts[4], "m=")?.parse()?;
-    let authority_version_raw = required_part(parts[5], "a=")?;
-    let authority_version = authority_version_raw
-        .parse::<u64>()
-        .map_err(|_| JwtValidationError::InvalidIdentity)?;
-    if authority_version.to_string() != authority_version_raw {
-        return Err(JwtValidationError::InvalidIdentity);
-    }
-    let profile = required_part(parts[6], "p=")?.parse()?;
+    let profile = required_part(parts[2], "p=")?.parse()?;
 
     let identity = AuthenticatedIdentity {
         user_id,
-        actor,
-        delegation_id,
-        auth_method,
-        authority_version,
         profile,
+        issuer_host: issuer_host.to_owned(),
     };
     validate_identity(&identity)?;
     Ok(identity)
@@ -422,6 +342,15 @@ fn is_strict_https_resource(value: &str) -> bool {
         && url.password().is_none()
         && url.query().is_none()
         && url.fragment().is_none()
+}
+
+fn issuer_host(issuer: &str) -> Result<String, JwtValidationError> {
+    let url = Url::parse(issuer).map_err(|_| JwtValidationError::InvalidPolicy)?;
+    let host = url.host_str().ok_or(JwtValidationError::InvalidPolicy)?;
+    if host.is_empty() {
+        return Err(JwtValidationError::InvalidPolicy);
+    }
+    Ok(host.to_owned())
 }
 
 fn validate_jwk_entry(entry: &JwkEntry) -> Result<(), JwtValidationError> {
@@ -481,54 +410,26 @@ fn validate_claims(
         || claims.issued_at > now
         || claims.expires_at <= now
         || !(MIN_TOKEN_TTL_SECONDS..=MAX_TOKEN_TTL_SECONDS).contains(&ttl)
-        || claims.authority_version == 0
-        || claims.db_role != claims.db_profile.database_role()
         || !is_valid_internal_id(&claims.token_id)
     {
         return Err(JwtValidationError::InvalidClaims);
     }
 
-    if requested_role != claims.db_role {
+    if requested_role != claims.profile.database_role() {
         return Err(JwtValidationError::RequestedRoleMismatch);
     }
 
-    let actor = match (
-        claims.auth_method,
-        claims.client_id.as_deref(),
-        claims.credential_id.as_deref(),
-    ) {
-        (AuthMethod::OAuth, Some(client_id), None) => {
-            AuthenticatedActor::OAuthClient(client_id.to_owned())
-        }
-        (AuthMethod::ApiKey, None, Some(credential_id)) => {
-            AuthenticatedActor::ApiKeyCredential(credential_id.to_owned())
-        }
-        _ => return Err(JwtValidationError::InvalidClaims),
-    };
-
     let identity = AuthenticatedIdentity {
         user_id: claims.subject.clone(),
-        actor,
-        delegation_id: claims.delegation_id.clone(),
-        auth_method: claims.auth_method,
-        authority_version: claims.authority_version,
-        profile: claims.db_profile,
+        profile: claims.profile,
+        issuer_host: issuer_host(&policy.issuer)?,
     };
     validate_identity(&identity)?;
     Ok(identity)
 }
 
 fn validate_identity(identity: &AuthenticatedIdentity) -> Result<(), JwtValidationError> {
-    let actor_id = match (&identity.auth_method, &identity.actor) {
-        (AuthMethod::OAuth, AuthenticatedActor::OAuthClient(id)) => id,
-        (AuthMethod::ApiKey, AuthenticatedActor::ApiKeyCredential(id)) => id,
-        _ => return Err(JwtValidationError::InvalidIdentity),
-    };
-    if identity.authority_version == 0
-        || !is_valid_internal_id(&identity.user_id)
-        || !is_valid_internal_id(actor_id)
-        || !is_valid_internal_id(&identity.delegation_id)
-    {
+    if !is_valid_internal_id(&identity.user_id) || identity.issuer_host.is_empty() {
         return Err(JwtValidationError::InvalidIdentity);
     }
     Ok(())
