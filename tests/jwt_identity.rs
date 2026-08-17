@@ -353,11 +353,7 @@ fn token_rejects_unknown_kid_wrong_algorithm_and_tampered_signature() {
     };
     segments[2].replace_range(..1, replacement);
     assert_eq!(
-        verifier.verify(
-            &segments.join("."),
-            claims.profile.database_role(),
-            NOW + 1,
-        ),
+        verifier.verify(&segments.join("."), claims.profile.database_role(), NOW + 1,),
         Err(JwtValidationError::InvalidSignature)
     );
 }
@@ -476,10 +472,10 @@ fn identity_codec_rejects_ambiguity_unknown_versions_and_oversize_values() {
     assert!(decode_system_user(&format!("scram:{encoded}")).is_err());
     assert!(decode_authn_id(&"x".repeat(MAX_AUTHN_ID_BYTES + 1)).is_err());
     assert!(decode_system_user(&format!("oauth:{}", "x".repeat(MAX_AUTHN_ID_BYTES + 1))).is_err());
-    assert!(decode_system_user(
-        "oauth:pggomtm:v2;u=usr;actor=client:cli;d=dlg;m=oauth;a=7;p=ordinary"
-    )
-    .is_err());
+    assert!(
+        decode_system_user("oauth:pggomtm:v2;u=usr;actor=client:cli;d=dlg;m=oauth;a=7;p=ordinary")
+            .is_err()
+    );
 }
 
 #[test]
