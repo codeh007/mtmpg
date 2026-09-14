@@ -36,4 +36,4 @@ url = "2"
 base64ct = "1"
 
 [build-dependencies]
-bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
+bindgen = { version = "0.73", default-features = false, features = ["runtime"] }
